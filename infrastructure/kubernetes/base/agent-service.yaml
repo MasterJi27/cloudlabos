@@ -1,0 +1,149 @@
+---
+# Agent Service - AI agent lifecycle & task dispatch
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+  namespace: cloudlabos
+  labels:
+    app: agent-service
+    app.kubernetes.io/name: agent-service
+    app.kubernetes.io/part-of: cloudlabos
+    app.kubernetes.io/component: agents
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: agent-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: agent-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cloudlabos
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      tolerations:
+        - key: "role"
+          operator: "Equal"
+          value: "agents"
+          effect: "NoSchedule"
+      nodeSelector:
+        role: agents
+      containers:
+        - name: agent-service
+          image: cloudlabos/agent-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+              name: http
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: redis-url
+            - name: QDRANT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: qdrant-url
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: openrouter-api-key
+            - name: MEMORY_SERVICE_URL
+              value: "http://memory-service:8003"
+            - name: BROWSER_SERVICE_URL
+              value: "http://browser-service:8004"
+            - name: RESEARCH_SERVICE_URL
+              value: "http://research-service:8005"
+            - name: WORKFLOW_ENGINE_URL
+              value: "http://workflow-engine:8002"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: cloudlabos
+  labels:
+    app: agent-service
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-service
+  ports:
+    - port: 8001
+      targetPort: 8001
+      name: http
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-service
+  namespace: cloudlabos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

@@ -1,0 +1,110 @@
+# CloudLabOS GCP Deployment (connects to Cloud SQL & Cloud Memorystore)
+version: "3.9"
+
+services:
+  # Frontend - Cloud Run
+  # Deploy via: gcloud run deploy cloudlabos-web --image=cloudlabos/web:latest
+
+  # API Gateway
+  api-gateway:
+    image: cloudlabos/api-gateway:latest
+    environment:
+      DATABASE_URL: ${CLOUD_SQL_CONNECTION_STRING}  # Cloud SQL
+      REDIS_URL: ${REDIS_URL}                        # Cloud Memorystore
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Agent Service
+  agent-service:
+    image: cloudlabos/agent-service:latest
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: ${CLOUD_SQL_CONNECTION_STRING}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    depends_on:
+      - api-gateway
+    deploy:
+      replicas: 3
+
+  # Workflow Engine
+  workflow-engine:
+    image: cloudlabos/workflow-engine:latest
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: ${CLOUD_SQL_CONNECTION_STRING}
+    depends_on:
+      - api-gateway
+
+  # Memory Service
+  memory-service:
+    image: cloudlabos/memory-service:latest
+    environment:
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: ${CLOUD_SQL_CONNECTION_STRING}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+  # Browser Service
+  browser-service:
+    image: cloudlabos/browser-service:latest
+    environment:
+      REDIS_URL: ${REDIS_URL}
+    shm_size: 2gb
+    cap_add: [SYS_ADMIN]
+
+  # Research Service
+  research-service:
+    image: cloudlabos/research-service:latest
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      REDIS_URL: ${REDIS_URL}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+  # Qdrant (Vector DB) - Can use managed or self-hosted
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  # Monitoring Stack (optional - can use Cloud Monitoring instead)
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+
+# Usage with GCP:
+# 1. Set environment variables
+# 2. Use Cloud SQL Proxy for local development
+# 3. Deploy to GKE using kubectl apply -f infrastructure/kubernetes/gke/

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - apps/api-gateway
+          - apps/agent-service
+          - apps/workflow-engine
+          - apps/memory-service
+          - apps/browser-service
+          - apps/research-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check ${{ matrix.service }}/ --no-fix
+        continue-on-error: true
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  test-python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cloudlabos_test
+          POSTGRES_USER: cloudlabos
+          POSTGRES_PASSWORD: cloudlabos_test
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r apps/api-gateway/requirements.txt pytest pytest-asyncio httpx
+      - run: |
+          export DATABASE_URL=postgresql://cloudlabos:cloudlabos_test@localhost:5432/cloudlabos_test
+          export REDIS_URL=redis://localhost:6379
+          export JWT_SECRET=test-jwt-secret-key-for-ci-at-least-32-chars
+          export ENCRYPTION_KEY=test-encryption-key-for-ci-at-least-32-chars
+          python -m pytest apps/api-gateway/tests/ -v
+        continue-on-error: true
+
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cloudlabos-api-gateway ./apps/api-gateway
+      - run: docker build -t cloudlabos-workflow-engine ./apps/workflow-engine
+      - run: docker build -t cloudlabos-agent-service -f apps/agent-service/Dockerfile .

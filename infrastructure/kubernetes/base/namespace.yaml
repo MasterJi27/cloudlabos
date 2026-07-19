@@ -1,0 +1,9 @@
+---
+# CloudLabOS - Single Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudlabos
+  labels:
+    app.kubernetes.io/part-of: cloudlabos
+    environment: production

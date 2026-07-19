@@ -1,0 +1,156 @@
+---
+# Browser Service - Playwright automation + sandboxed exec
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser-service
+  namespace: cloudlabos
+  labels:
+    app: browser-service
+    app.kubernetes.io/name: browser-service
+    app.kubernetes.io/part-of: cloudlabos
+    app.kubernetes.io/component: browser
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: browser-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: browser-service
+        role: browser
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8004"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cloudlabos
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      tolerations:
+        - key: "role"
+          operator: "Equal"
+          value: "browser"
+          effect: "NoSchedule"
+      nodeSelector:
+        role: browser
+      containers:
+        - name: browser-service
+          image: cloudlabos/browser-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8004
+              name: http
+              protocol: TCP
+          securityContext:
+            privileged: false
+            capabilities:
+              add:
+                - SYS_ADMIN
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: redis-url
+            - name: X_INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloudlabos-secrets
+                  key: jwt-secret
+            - name: PLAYWRIGHT_BROWSERS_PATH
+              value: "/ms-playwright"
+          volumeMounts:
+            - name: playwright-cache
+              mountPath: /ms-playwright
+            - name: shm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 18
+      volumes:
+        - name: playwright-cache
+          emptyDir: {}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: browser-service
+  namespace: cloudlabos
+  labels:
+    app: browser-service
+spec:
+  type: ClusterIP
+  selector:
+    app: browser-service
+  ports:
+    - port: 8004
+      targetPort: 8004
+      name: http
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: browser-service
+  namespace: cloudlabos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: browser-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
