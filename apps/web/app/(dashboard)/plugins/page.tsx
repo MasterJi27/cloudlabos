@@ -1,38 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, CheckCircle2, Download, Trash2, Box, Bell, Code, Sparkles, HardDrive, Link } from "lucide-react";
+import { Search, CheckCircle2, Download, Trash2, Box, Bell, Code, Sparkles, HardDrive, Link, Loader2, MessageSquare, BarChart3, ClipboardList, Bug, Mail, Brain, Database, GitBranch, AlertTriangle } from "lucide-react";
 import { Tabs } from "@/components/Tabs";
+import { api } from "@/lib/api";
 
-interface Plugin {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  author: string;
-  installCount: string;
-  category: string;
-  icon: React.ElementType;
-}
+const ICON_MAP: Record<string, React.ElementType> = { Bell, Code, Link, Box, HardDrive, Sparkles, MessageSquare, BarChart3, ClipboardList, Bug, Mail, Brain, Database, GitBranch, AlertTriangle, CheckCircle2 };
 
-const PLUGINS: Plugin[] = [
-  { id: "1", name: "Slack Notifier", description: "Send real-time alerts and workflow events to Slack channels.", version: "2.1.0", author: "CloudLab", installCount: "12.4k", category: "Notifications", icon: Bell },
-  { id: "2", name: "GitHub Actions Sync", description: "Trigger and monitor GitHub Actions directly from your pipelines.", version: "1.4.2", author: "CloudLab", installCount: "8.9k", category: "DevOps", icon: Code },
-  { id: "3", name: "Jira Ticket Creator", description: "Automatically create and update Jira tickets on workflow failures.", version: "3.0.1", author: "Atlassian", installCount: "15.2k", category: "Integrations", icon: Link },
-  { id: "4", name: "Datadog Metrics Exporter", description: "Export telemetry and custom metrics to Datadog dashboards.", version: "1.2.0", author: "Datadog", installCount: "6.1k", category: "DevOps", icon: Box },
-  { id: "5", name: "PagerDuty Alerting", description: "Trigger PagerDuty incidents for critical infrastructure alerts.", version: "2.0.5", author: "PagerDuty", installCount: "9.3k", category: "Notifications", icon: Bell },
-  { id: "6", name: "AWS S3 Backup", description: "Automated backups and state synchronization to AWS S3 buckets.", version: "4.1.0", author: "CloudLab", installCount: "22.1k", category: "Storage", icon: HardDrive },
-  { id: "7", name: "OpenAI GPT-4 Connector", description: "Integrate LLM capabilities for automated log analysis and suggestions.", version: "1.0.3", author: "CloudLab AI", installCount: "4.5k", category: "AI/ML", icon: Sparkles },
-  { id: "8", name: "Stripe Billing Webhook", description: "Listen to Stripe events and trigger provisioning workflows.", version: "1.1.0", author: "Stripe", installCount: "3.2k", category: "Integrations", icon: Link },
-  { id: "9", name: "Confluence Doc Sync", description: "Keep infrastructure documentation up to date in Confluence.", version: "1.0.8", author: "Atlassian", installCount: "5.4k", category: "Integrations", icon: Link },
-  { id: "10", name: "Linear Issue Tracker", description: "Sync tasks and bugs seamlessly with Linear workspaces.", version: "2.2.0", author: "Linear", installCount: "7.8k", category: "Integrations", icon: Link }
-];
+const CATEGORY_MAP: Record<string, string> = {
+  communication: "Notifications", monitoring: "DevOps", alerting: "Notifications",
+  "project-management": "Integrations", devops: "DevOps", storage: "Storage",
+  data: "Integrations", ai: "AI/ML",
+};
 
 export default function PluginsPage() {
+  const [plugins, setPlugins] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [installedPlugins, setInstalledPlugins] = useState<Set<string>>(new Set(["1", "2"]));
+  const [installedPlugins, setInstalledPlugins] = useState<Set<string>>(new Set(["slack", "datadog", "github", "openai", "email"]));
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await api.listPlugins() as any[];
+        setPlugins(data);
+      } catch {
+        setPlugins([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   const toggleInstall = (id: string) => {
     setInstalledPlugins(prev => {
@@ -43,9 +44,10 @@ export default function PluginsPage() {
     });
   };
 
-  const filteredPlugins = PLUGINS.filter(plugin => {
+  const filteredPlugins = plugins.filter((plugin: any) => {
+    const category = CATEGORY_MAP[plugin.category] || plugin.category || "Other";
     const matchesSearch = plugin.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = activeCategory === "All" || plugin.category === activeCategory;
+    const matchesCategory = activeCategory === "All" || category === activeCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -86,9 +88,14 @@ export default function PluginsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <AnimatePresence mode="popLayout">
-          {filteredPlugins.map((plugin, idx) => {
+          {loading ? (
+            <div className="col-span-full flex items-center justify-center py-24 text-[var(--text-tertiary)]">
+              <Loader2 className="w-6 h-6 animate-spin" />
+            </div>
+          ) : filteredPlugins.map((plugin: any, idx) => {
             const isInstalled = installedPlugins.has(plugin.id);
-            const Icon = plugin.icon;
+            const Icon = ICON_MAP[plugin.icon] || Box;
+            const category = CATEGORY_MAP[plugin.category] || plugin.category || "Other";
 
             return (
               <motion.div
@@ -105,7 +112,7 @@ export default function PluginsPage() {
                     <Icon className="w-6 h-6 text-[var(--text-primary)]" />
                   </div>
                   <span className="text-[10px] font-mono px-2.5 py-1 bg-[var(--surface-1)] shadow-[var(--edge-subtle)] text-[var(--text-secondary)] rounded-full uppercase tracking-wider">
-                    {plugin.category}
+                    {category}
                   </span>
                 </div>
                 
@@ -114,9 +121,8 @@ export default function PluginsPage() {
                 
                 <div className="flex items-center gap-4 mt-6 text-[11px] font-mono text-[var(--text-tertiary)]">
                   <span>v{plugin.version}</span>
-                  <span>By {plugin.author}</span>
                   <span className="flex items-center gap-1.5 ml-auto">
-                    <Download className="w-3.5 h-3.5" /> {plugin.installCount}
+                    <Download className="w-3.5 h-3.5" /> {isInstalled ? "Installed" : "Available"}
                   </span>
                 </div>
 

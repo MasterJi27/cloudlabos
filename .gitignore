@@ -43,3 +43,17 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.xml
+
+# Runtime data / local state
+*.db
+*.sqlite
+*.sqlite3
+dump.rdb
+snapshots/
+storage/
+tsconfig.tsbuildinfo
+next-dev.log
+
+# Scratch / accidental captures
+tmp_job_id.txt
+/-w

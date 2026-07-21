@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Globe, Monitor, RefreshCw, Camera, Plus, Terminal, Search, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -12,22 +12,23 @@ export default function BrowserPage() {
   const [automationLogs, setAutomationLogs] = useState<string[]>([]);
   const [navigating, setNavigating] = useState(false);
 
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.listBrowserSessions();
       setSessions({ active: data.sessions || (activeUrl !== "about:blank" ? 1 : 0) });
-    } catch {
+    } catch (e) {
+      console.error("listBrowserSessions", e);
       setSessions({ active: activeUrl !== "about:blank" ? 1 : 0 });
     }
     setLoading(false);
-  };
+  }, [activeUrl]);
 
   useEffect(() => {
     fetchSessions();
     const interval = setInterval(fetchSessions, 10000);
     return () => clearInterval(interval);
-  }, [activeUrl]);
+  }, [fetchSessions]);
 
   const handleNavigate = async (url: string) => {
     if (!url) return;
@@ -126,7 +127,7 @@ export default function BrowserPage() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--void)] text-center p-8">
                   <Globe className="w-12 h-12 mx-auto text-[var(--text-tertiary)] mb-4 opacity-40" />
                   <h3 className="text-[15px] font-medium text-[var(--text-primary)] tracking-body mb-2">Browser Viewport Empty</h3>
-                  <p className="text-[13px] text-[var(--text-secondary)] max-w-sm leading-relaxed">Enter a URL in the address bar above or click "New Session" to start automated testing.</p>
+                  <p className="text-[13px] text-[var(--text-secondary)] max-w-sm leading-relaxed">Enter a URL in the address bar above or click New Session to start automated testing.</p>
                 </div>
               ) : navigating ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10 space-y-4">
@@ -186,7 +187,7 @@ export default function BrowserPage() {
                     color = "text-[var(--warning)]";
                   }
                   return (
-                    <div key={i} className={`leading-relaxed ${color}`}>
+                    <div key={`log-${i}`} className={`leading-relaxed ${color}`}>
                       {log}
                     </div>
                   );

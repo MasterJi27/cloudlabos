@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   CreditCard,
@@ -10,54 +10,69 @@ import {
   Zap,
   HardDrive,
   Activity,
-  Clock
+  Clock,
+  Loader2
 } from 'lucide-react';
-
-const CURRENT_PLAN = 'Pro';
-
-const PRICING_TIERS = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: '$0',
-    period: '/mo',
-    description: 'Perfect for exploring the platform.',
-    features: ['1,000 API calls', '1GB Storage', '10 Workflow runs', 'Community Support'],
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    price: '$49',
-    period: '/mo',
-    description: 'For power users and small teams.',
-    features: ['50,000 API calls', '50GB Storage', '500 Workflow runs', 'Priority Support', 'Advanced Analytics'],
-    popular: true,
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    price: '$199',
-    period: '/mo',
-    description: 'For large scale operations.',
-    features: ['Unlimited API calls', '500GB Storage', 'Unlimited Workflow runs', '24/7 Phone Support', 'Custom Integrations', 'Dedicated Account Manager'],
-  }
-];
-
-const USAGE_METRICS = [
-  { label: 'API Calls', used: 34500, limit: 50000, icon: Zap, format: 'number' },
-  { label: 'Storage', used: 28.5, limit: 50, icon: HardDrive, format: 'gb' },
-  { label: 'Workflow Runs', used: 412, limit: 500, icon: Activity, format: 'number' },
-  { label: 'Agent Hours', used: 85, limit: 100, icon: Clock, format: 'hours' },
-];
-
-const BILLING_HISTORY = [
-  { id: 'INV-2026-07', date: 'Jul 1, 2026', description: 'Pro Plan - Monthly', amount: '$49.00', status: 'Paid' },
-  { id: 'INV-2026-06', date: 'Jun 1, 2026', description: 'Pro Plan - Monthly', amount: '$49.00', status: 'Paid' },
-  { id: 'INV-2026-05', date: 'May 1, 2026', description: 'Pro Plan - Monthly', amount: '$49.00', status: 'Paid' },
-];
+import { useToast } from '@/components/ui/Toast';
+import { useStore } from '@/store';
 
 export default function BillingPage() {
-  const [currentPlan] = useState(CURRENT_PLAN);
+  const { toast } = useToast();
+  const { plans, subscription, fetchPlans, fetchSubscription, fetchUpdateSubscription } = useStore();
+  const [switching, setSwitching] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPlans();
+    fetchSubscription();
+  }, [fetchPlans, fetchSubscription]);
+
+  const currentPlanName = subscription?.plan_name || 'Pro';
+  const currentPlanPrice = subscription?.price || 49;
+  const usage = subscription?.usage || { agents_used: 0, workflows_used: 0, runs_this_month: 0, runs_limit: 5000 };
+
+  const FALLBACK_TIERS = [
+    { id: 'free', name: 'Free', price: '$0', period: '/mo', description: 'Perfect for exploring the platform.', features: ['1,000 API calls', '1GB Storage', '10 Workflow runs', 'Community Support'] },
+    { id: 'pro', name: 'Pro', price: '$49', period: '/mo', description: 'For power users and small teams.', features: ['50,000 API calls', '50GB Storage', '500 Workflow runs', 'Priority Support', 'Advanced Analytics'], popular: true },
+    { id: 'enterprise', name: 'Enterprise', price: '$199', period: '/mo', description: 'For large scale operations.', features: ['Unlimited API calls', '500GB Storage', 'Unlimited Workflow runs', '24/7 Phone Support', 'Custom Integrations', 'Dedicated Account Manager'] },
+  ];
+
+  const PRICING_TIERS: any[] = Array.isArray(plans) && plans.length > 0
+    ? plans.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        price: typeof p.price === 'number' ? `$${p.price}` : p.price,
+        period: p.period || '/mo',
+        description: p.description || `Up to ${p.agents} agents, ${p.workflows} workflows, ${p.runs?.toLocaleString?.() ?? p.runs} runs/mo.`,
+        features: p.features || [],
+        popular: p.popular ?? p.id === 'pro',
+        agents: p.agents,
+        workflows: p.workflows,
+      }))
+    : FALLBACK_TIERS;
+
+  const usageMetrics = [
+    { label: 'Workflow Runs', used: usage.runs_this_month || 0, limit: usage.runs_limit || 5000, icon: Activity, format: 'number' },
+    { label: 'Agents', used: usage.agents_used || 0, limit: PRICING_TIERS.find((t: any) => t.name === currentPlanName)?.agents || 20, icon: Zap, format: 'number' },
+    { label: 'Workflows', used: usage.workflows_used || 0, limit: PRICING_TIERS.find((t: any) => t.name === currentPlanName)?.workflows || 50, icon: HardDrive, format: 'number' },
+  ];
+
+  const billingHistory = [
+    { id: 'INV-2026-07', date: 'Jul 1, 2026', description: `${currentPlanName} Plan - Monthly`, amount: `$${currentPlanPrice}.00`, status: 'Paid' },
+    { id: 'INV-2026-06', date: 'Jun 1, 2026', description: `${currentPlanName} Plan - Monthly`, amount: `$${currentPlanPrice}.00`, status: 'Paid' },
+    { id: 'INV-2026-05', date: 'May 1, 2026', description: `${currentPlanName} Plan - Monthly`, amount: `$${currentPlanPrice}.00`, status: 'Paid' },
+  ];
+
+  const handleSwitchPlan = async (planId: string) => {
+    setSwitching(planId);
+    try {
+      await fetchUpdateSubscription(planId);
+      toast("success", `Switched to ${PRICING_TIERS.find((t: any) => t.id === planId)?.name || planId} plan`);
+    } catch (e) {
+      toast("error", "Failed to switch plan");
+    } finally {
+      setSwitching(null);
+    }
+  };
   
   const getProgressColor = (percent: number) => {
     if (percent >= 90) return 'var(--danger)';
@@ -85,17 +100,17 @@ export default function BillingPage() {
             <div>
               <h2 className="text-[13px] font-medium tracking-body text-[var(--text-secondary)] mb-2">Current Plan</h2>
               <div className="flex items-center gap-3">
-                <span className="text-[32px] font-medium tracking-header-lg text-[var(--text-primary)]">{currentPlan}</span>
+                <span className="text-[32px] font-medium tracking-header-lg text-[var(--text-primary)]">{currentPlanName}</span>
                 <span className="px-2.5 py-1 bg-[var(--surface-2)] shadow-[var(--edge-subtle)] text-[var(--success)] rounded-full text-[11px] font-medium tracking-micro">Active</span>
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[32px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">$49<span className="text-[16px] text-[var(--text-tertiary)]">/mo</span></div>
+              <div className="text-[32px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">${currentPlanPrice}<span className="text-[16px] text-[var(--text-tertiary)]">/mo</span></div>
             </div>
           </div>
           <div className="mt-auto pt-4 border-t border-[rgba(255,255,255,0.04)] flex justify-between text-[12px] font-mono text-[var(--text-tertiary)]">
             <span>Next billing date:</span>
-            <span className="text-[var(--text-secondary)]">Aug 1, 2026</span>
+            <span className="text-[var(--text-secondary)]">{subscription?.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString() : "—"}</span>
           </div>
         </motion.div>
 
@@ -130,12 +145,12 @@ export default function BillingPage() {
       <div className="mb-16">
         <h2 className="text-[15px] font-medium tracking-body text-[var(--text-primary)] mb-6">Current Usage</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {USAGE_METRICS.map((metric, index) => {
+          {usageMetrics.map((metric, index) => {
             const percent = (metric.used / metric.limit) * 100;
             const Icon = metric.icon;
             return (
               <motion.div
-                key={index}
+                key={metric.label}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.04 }}
@@ -171,8 +186,8 @@ export default function BillingPage() {
       {/* Plans Comparison */}
       <div className="mb-16">
         <h2 className="text-[15px] font-medium tracking-body text-[var(--text-primary)] mb-8 text-center">Choose Your Plan</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {PRICING_TIERS.map((tier) => (
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${PRICING_TIERS.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
+          {PRICING_TIERS.map((tier: any) => (
             <div 
               key={tier.id} 
               className={`card p-8 flex flex-col relative overflow-hidden transition-colors ${
@@ -193,7 +208,7 @@ export default function BillingPage() {
               
               <ul className="space-y-3 flex-grow mb-8">
                 {tier.features.map((feature, i) => (
-                  <li key={i} className="flex items-start gap-3 text-[13px] text-[var(--text-secondary)] leading-relaxed">
+                  <li key={`${tier.name}-${i}`} className="flex items-start gap-3 text-[13px] text-[var(--text-secondary)] leading-relaxed">
                     <div className="w-4 h-4 rounded-full bg-[var(--surface-2)] shadow-[var(--edge-subtle)] flex items-center justify-center flex-shrink-0 mt-0.5">
                       <Check className="w-3 h-3 text-[var(--text-primary)]" strokeWidth={3} />
                     </div>
@@ -203,12 +218,14 @@ export default function BillingPage() {
               </ul>
 
               <button 
-                className={currentPlan === tier.name ? 'btn-secondary w-full justify-center' : 'btn-primary w-full justify-center'}
-                disabled={currentPlan === tier.name}
+                onClick={() => handleSwitchPlan(tier.id)}
+                className={currentPlanName === tier.name ? 'btn-secondary w-full justify-center' : 'btn-primary w-full justify-center'}
+                disabled={currentPlanName === tier.name || switching === tier.id}
               >
-                {currentPlan === tier.name 
+                {switching === tier.id ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {currentPlanName === tier.name 
                   ? 'Current Plan' 
-                  : (PRICING_TIERS.findIndex(t => t.name === currentPlan) > PRICING_TIERS.findIndex(t => t.id === tier.id) ? 'Downgrade' : 'Upgrade')}
+                  : switching === tier.id ? 'Switching...' : 'Switch'}
               </button>
             </div>
           ))}
@@ -233,7 +250,7 @@ export default function BillingPage() {
                 </tr>
               </thead>
             <tbody>
-                {BILLING_HISTORY.map((invoice) => (
+                {billingHistory.map((invoice) => (
                   <tr key={invoice.id}>
                     <td className="px-6 py-4 text-[13px] font-mono text-[var(--text-secondary)]">{invoice.date}</td>
                     <td className="px-6 py-4 text-[14px] font-medium tracking-body text-[var(--text-primary)]">{invoice.description}</td>

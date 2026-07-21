@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import {
-  ShieldAlert, Terminal, Clock, AlertTriangle, Plus, X, Trash2, Check, Ban, Activity, Shield
+  ShieldAlert, Terminal, Clock, Plus, X, Trash2, Check, Ban, Activity, Shield
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "@/store";
 import { Tabs } from "@/components/Tabs";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
@@ -45,20 +46,20 @@ export default function ApprovalsPage() {
   const [newRisk, setNewRisk] = useState<Rule["risk"]>("low");
   const [newAction, setNewAction] = useState<Rule["action"]>("auto-approve");
 
-  const { approvals, pendingApprovals, fetchApprovals, fetchApproveAction, fetchRejectAction, isAuthenticated } = useStore();
+  const { approvals, pendingApprovals, fetchApprovals, fetchApproveAction, fetchRejectAction, isAuthenticated, currentWorkspace } = useStore();
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchApprovals();
     }
-  }, [isAuthenticated, fetchApprovals]);
+  }, [isAuthenticated, fetchApprovals, currentWorkspace]);
 
   const handleApprove = async (id: string) => {
-    try { await fetchApproveAction(id, reviewNotes[id]); } catch {}
+    try { await fetchApproveAction(id, reviewNotes[id]); } catch (e) { console.error("Approve failed", e); }
   };
 
   const handleReject = async (id: string) => {
-    try { await fetchRejectAction(id, reviewNotes[id]); } catch {}
+    try { await fetchRejectAction(id, reviewNotes[id]); } catch (e) { console.error("Reject failed", e); }
   };
 
   const handleCreateRule = (e: React.FormEvent) => {
@@ -115,7 +116,7 @@ export default function ApprovalsPage() {
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2">Security Score</div>
           <div className="text-[40px] font-medium tracking-header-lg text-[var(--success)] font-mono">
-            99.4%
+            {approvals.length > 0 ? Math.round((approvals.filter(a => a.status === "approved").length / approvals.length) * 100) : 0}%
           </div>
         </div>
       </div>
@@ -151,7 +152,7 @@ export default function ApprovalsPage() {
                     <div key={approval.id} className="group flex flex-col sm:flex-row gap-6 py-6 px-4 -mx-4 rounded-xl hover:bg-[var(--surface-2)] transition-colors">
                       <div className="flex-1 min-w-0 space-y-4">
                         <div className="flex items-center gap-3">
-                          <h3 className="text-[15px] font-medium text-[var(--text-primary)] tracking-body">{approval.run_name}</h3>
+                          <h3 className="text-[15px] font-medium text-[var(--text-primary)] tracking-body">{approval.workflow_name}</h3>
                           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full shadow-[var(--edge-subtle)] bg-[var(--surface-1)]">
                             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: config.color }} />
                             <span className="text-[11px] font-medium text-[var(--text-secondary)] tracking-micro">{config.label} Risk</span>
@@ -163,8 +164,8 @@ export default function ApprovalsPage() {
                         </div>
                         
                         <div className="flex items-center gap-4 text-[12px] font-mono text-[var(--text-tertiary)]">
-                          <span className="flex items-center gap-1.5"><Terminal className="w-3.5 h-3.5" /> {approval.requested_by}</span>
-                          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> {new Date(approval.requested_at).toLocaleString()}</span>
+                          <span className="flex items-center gap-1.5"><Terminal className="w-3.5 h-3.5" /> {approval.requester}</span>
+                          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> {new Date(approval.created_at).toLocaleString()}</span>
                         </div>
                         
                         {approval.risk_reasons && approval.risk_reasons.length > 0 && (
@@ -172,7 +173,7 @@ export default function ApprovalsPage() {
                             <p className="text-[11px] font-medium text-[var(--text-secondary)] mb-2 tracking-micro">Risk Factors</p>
                             <ul className="space-y-1.5">
                               {approval.risk_reasons.map((reason, i) => (
-                                <li key={i} className="text-[13px] text-[var(--text-secondary)] flex items-start gap-2 tracking-body">
+                                <li key={`${reason}-${i}`} className="text-[13px] text-[var(--text-secondary)] flex items-start gap-2 tracking-body">
                                   <span className="text-[var(--warning)] mt-0.5">•</span>
                                   {reason}
                                 </li>
@@ -220,7 +221,7 @@ export default function ApprovalsPage() {
                   <div key={approval.id} className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 py-4 border-b border-[rgba(255,255,255,0.06)] last:border-0 hover:bg-[var(--surface-2)] -mx-4 px-4 rounded-lg transition-colors">
                     <div className="min-w-0">
                       <div className="flex items-center gap-3 mb-1.5">
-                        <span className="font-medium text-[14px] text-[var(--text-primary)] tracking-body">{approval.run_name}</span>
+                        <span className="font-medium text-[14px] text-[var(--text-primary)] tracking-body">{approval.workflow_name}</span>
                         <div className="flex items-center gap-1.5">
                           <span className={`w-1.5 h-1.5 rounded-full ${approval.status === "approved" ? "bg-[var(--success)]" : "bg-[var(--danger)]"}`} />
                           <span className="text-[12px] text-[var(--text-secondary)] capitalize">{approval.status}</span>
@@ -231,7 +232,7 @@ export default function ApprovalsPage() {
                       </code>
                     </div>
                     <span className="text-[12px] font-mono text-[var(--text-tertiary)] whitespace-nowrap">
-                      {new Date(approval.requested_at).toLocaleDateString()}
+                      {new Date(approval.created_at).toLocaleDateString()}
                     </span>
                   </div>
                 ))
@@ -256,7 +257,7 @@ export default function ApprovalsPage() {
             
             <div className="space-y-4">
               {rules.map((rule, idx) => (
-                <div key={idx} className="group flex flex-col gap-1.5">
+                <div key={rule.pattern} className="group flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
                     <code className="text-[13px] text-[var(--text-primary)] font-mono truncate">{rule.pattern}</code>
                     <button 
@@ -286,9 +287,20 @@ export default function ApprovalsPage() {
       </div>
 
       {/* OS-Level Modal Overlay (Uses surface-overlay blur for transient only) */}
-      {isRuleModalOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-sm bg-[var(--void)] border border-[rgba(255,255,255,0.1)] rounded-2xl p-8 shadow-[var(--elev-3)]">
+      <AnimatePresence>
+        {isRuleModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-sm bg-[var(--void)] border border-[rgba(255,255,255,0.1)] rounded-2xl p-8 shadow-[var(--elev-3)]"
+            >
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-[20px] font-medium tracking-subheader text-[var(--text-primary)]">New Policy</h2>
               <button onClick={() => setIsRuleModalOpen(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
@@ -314,7 +326,7 @@ export default function ApprovalsPage() {
                   <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-2 tracking-body">Risk</label>
                   <select 
                     value={newRisk} 
-                    onChange={e => setNewRisk(e.target.value as any)}
+                    onChange={e => setNewRisk(e.target.value as Rule["risk"])}
                     className="input"
                   >
                     <option value="low">Low</option>
@@ -327,7 +339,7 @@ export default function ApprovalsPage() {
                   <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-2 tracking-body">Action</label>
                   <select 
                     value={newAction} 
-                    onChange={e => setNewAction(e.target.value as any)}
+                    onChange={e => setNewAction(e.target.value as Rule["action"])}
                     className="input"
                   >
                     <option value="auto-approve">Approve</option>
@@ -343,9 +355,10 @@ export default function ApprovalsPage() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -108,7 +108,8 @@ export default function TerminalPage() {
           const runId = await fetchExecuteWorkflow(wfId);
           await fetchRuns(); // Refresh runs list in store
           setLines((prev) => [...prev, { id: prev.length, type: "output", text: `[success] Run initiated: ${runId}` }]);
-        } catch {
+        } catch (e) {
+          console.error("run-workflow", e);
           setLines((prev) => [...prev, { id: prev.length, type: "error", text: `[error] Execution rejected by pipeline engine` }]);
         }
       }

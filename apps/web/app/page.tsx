@@ -4,43 +4,16 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Play, Activity, Shield, Zap, Workflow, AlertTriangle,
-  Terminal, Globe, CheckCircle2, XCircle, Cpu, ArrowUpRight,
-  Eye, RefreshCw, LayoutDashboard, HeartPulse, Boxes
+  Terminal, Globe, CheckCircle2, XCircle, Cpu, RefreshCw
 } from "lucide-react";
-import { useStore } from "@/store";
+import { useAuthStore, useRunsStore, useAgentsStore, useWorkflowsStore, useMemoryStore } from "@/lib/store";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 import { Tabs } from "@/components/Tabs";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
 
-const trendData = [
-  { name: "Mon", runs: 24, success: 22, failed: 2 },
-  { name: "Tue", runs: 32, success: 30, failed: 2 },
-  { name: "Wed", runs: 28, success: 27, failed: 1 },
-  { name: "Thu", runs: 45, success: 42, failed: 3 },
-  { name: "Fri", runs: 38, success: 36, failed: 2 },
-  { name: "Sat", runs: 18, success: 17, failed: 1 },
-  { name: "Sun", runs: 22, success: 22, failed: 0 },
-];
-
-const RECENT_ACTIVITY = [
-  { id: "a1", icon: Play, text: "Workflow 'daily-scraper' completed", time: "2m ago", color: "var(--success)" },
-  { id: "a2", icon: Shield, text: "Approval request from agent 'sentinel'", time: "8m ago", color: "var(--warning)" },
-  { id: "a3", icon: Cpu, text: "Agent 'hawk-eye' provisioned (4GB)", time: "14m ago", color: "var(--text-primary)" },
-  { id: "a4", icon: XCircle, text: "Run #3841 failed at step 'validate'", time: "22m ago", color: "var(--danger)" },
-  { id: "a5", icon: Workflow, text: "New workflow 'data-pipeline-v3' created", time: "45m ago", color: "var(--text-primary)" },
-  { id: "a6", icon: CheckCircle2, text: "Approval granted for 'rm -rf /tmp/cache'", time: "1h ago", color: "var(--success)" },
-  { id: "a7", icon: Globe, text: "Web agent scraped 14 pages from target", time: "2h ago", color: "var(--text-primary)" },
-];
-
-const UPTIME_SERVICES = [
-  { name: "API Gateway", status: "operational", uptime: "99.98%" },
-  { name: "Agent Runtime", status: "operational", uptime: "99.95%" },
-  { name: "Workflow Engine", status: "operational", uptime: "99.99%" },
-  { name: "Memory Store", status: "degraded", uptime: "99.72%" },
-  { name: "Browser Pool", status: "operational", uptime: "99.88%" },
-];
+const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function Dashboard() {
   const router = useRouter();
@@ -49,10 +22,15 @@ export default function Dashboard() {
   const [uptimeRefreshing, setUptimeRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
-  const {
-    activeRuns, pendingApprovals, agents, runHistory,
-    currentWorkspace, fetchRuns, fetchApprovals, fetchWorkspaces, fetchAgents, isAuthenticated,
-  } = useStore();
+  const auth = useAuthStore();
+  const { activeRuns, runHistory, fetchRuns } = useRunsStore();
+  const { agents, fetchAgents } = useAgentsStore();
+  const { workflows, fetchWorkflows } = useWorkflowsStore();
+  const { collections, fetchCollections } = useMemoryStore();
+  const pendingApprovals: any[] = [];
+  const currentWorkspace = auth.currentWorkspace;
+  const isAuthenticated = auth.isAuthenticated;
+  const fetchWorkspaces = auth.fetchWorkspaces;
 
   useEffect(() => {
     setIsClient(true);
@@ -64,29 +42,69 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchWorkspaces();
-      fetchAgents();
+    if (isAuthenticated && currentWorkspace) {
+      fetchAgents(currentWorkspace);
+      fetchRuns(currentWorkspace);
+      fetchWorkflows(currentWorkspace);
+      fetchCollections(currentWorkspace);
     }
-  }, [isAuthenticated, fetchWorkspaces, fetchAgents]);
+  }, [isAuthenticated, currentWorkspace, fetchAgents, fetchRuns, fetchWorkflows, fetchCollections]);
 
-  useEffect(() => {
-    if (currentWorkspace) {
-      fetchRuns();
-      fetchApprovals();
-    }
-  }, [currentWorkspace, fetchRuns, fetchApprovals]);
-
-  const totalRuns = runHistory.length + activeRuns.length;
-  const successRuns = runHistory.filter((r) => r.status === "success").length;
+  const allRuns = [...activeRuns, ...runHistory];
+  const totalRuns = allRuns.length;
+  const successRuns = allRuns.filter((r) => r.status === "success").length;
   const successRate = totalRuns > 0 ? ((successRuns / totalRuns) * 100).toFixed(1) : "0.0";
+  const activeAgents = agents.filter(a => a.status === "active" || a.status === "busy").length;
+  const totalWorkflows = workflows.length;
+
+  // Build trend data from real runs
+  const now = new Date();
+  const trendData = dayNames.map((name, i) => {
+    const dayOffset = (now.getDay() - i + 7) % 7;
+    const dayStart = new Date(now);
+    dayStart.setDate(now.getDate() - dayOffset);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setHours(23, 59, 59, 999);
+    const dayRuns = allRuns.filter(r => {
+      const d = new Date(r.started_at);
+      return d >= dayStart && d <= dayEnd;
+    });
+    return {
+      name,
+      runs: dayRuns.length,
+      success: dayRuns.filter(r => r.status === "success").length,
+      failed: dayRuns.filter(r => r.status === "failed").length,
+    };
+  }).reverse();
+
+  // Recent activity from real runs
+  const recentActivity = [...allRuns].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()).slice(0, 6).map(r => {
+    const isSuccess = r.status === "success";
+    const isFailed = r.status === "failed";
+    const isRunning = r.status === "running";
+    return {
+      id: r.id,
+      icon: isRunning ? Play : isFailed ? XCircle : CheckCircle2,
+      text: `${isRunning ? "Running" : isFailed ? "Failed" : "Completed"}: ${r.workflow_name}`,
+      time: new Date(r.started_at).toLocaleString(),
+      color: isFailed ? "var(--danger)" : isRunning ? "var(--text-primary)" : "var(--success)",
+    };
+  });
+
+  const uptimeServices: { name: string; status: "operational" | "degraded"; uptime: string }[] = [
+    { name: "API Gateway", status: "operational", uptime: "99.98%" },
+    { name: "Agent Runtime", status: activeAgents > 0 ? "operational" : "degraded", uptime: agents.length > 0 ? "99.95%" : "N/A" },
+    { name: "Workflow Engine", status: totalWorkflows > 0 ? "operational" : "degraded", uptime: totalWorkflows > 0 ? "99.99%" : "N/A" },
+    { name: "Memory Store", status: collections.length > 0 ? "operational" : "degraded", uptime: collections.length > 0 ? "99.72%" : "N/A" },
+  ];
 
   const refreshUptime = () => {
     setUptimeRefreshing(true);
     setTimeout(() => setUptimeRefreshing(false), 1200);
   };
 
-  const isDegraded = UPTIME_SERVICES.some(s => s.status !== "operational");
+  const isDegraded = uptimeServices.some(s => s.status !== "operational");
 
   return (
     <div className="max-w-7xl mx-auto pb-24 px-6 md:px-12 pt-12">
@@ -117,32 +135,32 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-20">
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2 flex items-center gap-1.5">
-            Active Pipelines
+            Active Agents <Cpu className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
           </div>
           <div className="text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] flex items-end gap-3 font-mono">
-            <AnimatedCounter value={activeRuns.length || 3} />
-            <span className="text-[13px] text-[var(--success)] font-medium mb-1.5 flex items-center tracking-normal font-sans"><ArrowUpRight className="w-3.5 h-3.5 mr-0.5"/> 1</span>
+            <AnimatedCounter value={activeAgents} />
+            <span className="text-[13px] text-[var(--text-secondary)] font-medium mb-1.5">/ {agents.length} total</span>
           </div>
         </div>
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2 flex items-center gap-1.5">
-            Pending Approvals {pendingApprovals.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[var(--danger)] animate-pulse" />}
+            Active Runs <Play className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
           </div>
-          <div className={`text-[40px] font-medium tracking-header-lg font-mono ${pendingApprovals.length > 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>
-            <AnimatedCounter value={pendingApprovals.length || 2} />
+          <div className="text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">
+            <AnimatedCounter value={activeRuns.length} />
           </div>
         </div>
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2">Total Executions</div>
           <div className="text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] flex items-end gap-3 font-mono">
-            <AnimatedCounter value={totalRuns || 48} />
-            <span className="text-[13px] text-[var(--success)] font-medium mb-1.5 flex items-center tracking-normal font-sans"><ArrowUpRight className="w-3.5 h-3.5 mr-0.5"/> 15%</span>
+            <AnimatedCounter value={totalRuns} />
+            <span className="text-[13px] text-[var(--text-secondary)] font-medium mb-1.5">workflows</span>
           </div>
         </div>
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2">Success Rate</div>
           <div className="text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">
-            {successRate}%
+            {totalRuns > 0 ? `${successRate}%` : "—"}
           </div>
         </div>
       </div>
@@ -198,7 +216,7 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between mb-8">
                   <div>
                     <h2 className="text-[16px] font-medium text-[var(--text-primary)] tracking-subheader">Execution Volume</h2>
-                    <p className="text-[14px] text-[var(--text-secondary)] mt-1">Weekly success vs failure</p>
+                    <p className="text-[14px] text-[var(--text-secondary)] mt-1">Last 7 days</p>
                   </div>
                   <div className="flex items-center gap-4 text-[13px] text-[var(--text-secondary)]">
                     <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-[var(--text-primary)]" /> Success</span>
@@ -206,7 +224,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="h-[280px] w-full text-[12px] font-mono">
-                  {isClient ? (
+                  {isClient && trendData.some(d => d.runs > 0) ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={trendData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
                         <defs>
@@ -226,7 +244,9 @@ export default function Dashboard() {
                         <Area type="monotone" dataKey="failed" stroke="var(--danger)" strokeWidth={2} fill="none" />
                       </AreaChart>
                     </ResponsiveContainer>
-                  ) : null}
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[var(--text-tertiary)] text-[13px]">No execution data yet. Run a workflow to see charts.</div>
+                  )}
                 </div>
               </div>
 
@@ -276,14 +296,14 @@ export default function Dashboard() {
                   {[...activeRuns, ...runHistory].slice(0, 5).map((run) => (
                     <div key={run.id} className="flex items-center py-4 px-4 -mx-4 rounded-lg hover:bg-[var(--surface-2)] transition-colors group">
                       <div className="w-1/3 text-[14px] font-medium text-[var(--text-primary)] truncate pr-4 tracking-body">{run.workflow_name}</div>
-                      <div className="w-1/4 text-[13px] font-mono text-[var(--text-secondary)]">{run.trigger_type}</div>
+                      <div className="w-1/4 text-[13px] font-mono text-[var(--text-secondary)]">{run.trigger}</div>
                       <div className="w-1/4 text-[13px] text-[var(--text-secondary)] font-mono flex items-center">
                         {run.status === "running" ? (
                           <div className="flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-primary)] animate-pulse" />
                             {run.progress}%
                           </div>
-                        ) : "45s"}
+                        ) : "-"}
                       </div>
                       <div className="w-1/6 flex justify-end items-center gap-3">
                         {run.status === "failed" && (
@@ -320,7 +340,7 @@ export default function Dashboard() {
                 </button>
               </div>
               <div className="space-y-6">
-                {UPTIME_SERVICES.map(svc => (
+                {uptimeServices.map(svc => (
                   <div key={svc.name} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className={`w-1.5 h-1.5 rounded-full ${svc.status === "operational" ? "bg-[var(--success)]" : "bg-[var(--warning)]"}`} />
@@ -332,7 +352,7 @@ export default function Dashboard() {
                           const isDown = svc.status === "degraded" && i >= 26 && i <= 28;
                           return (
                             <div
-                              key={i}
+                              key={`day-${i}`}
                               className={`w-1 h-6 rounded-[1px] ${isDown ? "bg-[var(--warning)]" : "bg-[var(--success)] opacity-40"}`}
                               title={`Day ${i + 1}`}
                             />
@@ -351,7 +371,7 @@ export default function Dashboard() {
                 <h2 className="text-[15px] font-medium text-[var(--text-primary)] tracking-subheader">Activity Log</h2>
               </div>
               <div className="divide-y divide-[rgba(255,255,255,0.04)]">
-                {RECENT_ACTIVITY.slice(0, 6).map(a => (
+                {recentActivity.slice(0, 6).map(a => (
                   <div key={a.id} className="py-4 flex gap-4 items-start">
                     <a.icon className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: a.color }} />
                     <div className="flex-1 min-w-0">

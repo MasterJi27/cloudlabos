@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, User, Shield, Bell, Palette, Database, Key, Plus, Trash2, Copy, Monitor, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import Image from "next/image";
+import { Save, User, Shield, Bell, Palette, Database, Key, Plus, Trash2, Monitor, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { useStore } from "@/store";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/Toast";
 
 export default function SettingsPage() {
+  const { toast } = useToast();
   const { user, apiKeys, fetchApiKeys, fetchCreateApiKey, fetchRevokeApiKey, sessions, fetchSessions, fetchRevokeSession } = useStore();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -59,21 +62,17 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await api.updateSettings({ theme: activeTheme, language, notifications, system });
-      
-      if (user) {
-        useStore.setState({
-          user: {
-            ...user,
-            name: profileName,
-            email: profileEmail
-          }
-        });
+
+      if (user && (profileName !== user.name || profileEmail !== user.email)) {
+        const updated = await api.updateProfile({ name: profileName, email: profileEmail });
+        useStore.setState({ user: { ...user, ...updated } });
       }
 
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch {
-      alert("Failed to save configuration settings");
+    } catch (e) {
+      console.error("settings save", e);
+      toast("error", "Failed to save configuration settings");
     } finally {
       setSaving(false);
     }
@@ -95,10 +94,10 @@ export default function SettingsPage() {
       setNewRawKey(raw);
       setNewKeyName("");
       setShowNewKeyForm(false);
-    } catch {}
+    } catch (e) { console.error("create API key", e); }
   };
 
-  const handleUpdatePassword = (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPassFeedback(null);
 
@@ -112,11 +111,15 @@ export default function SettingsPage() {
     }
 
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      await api.changePassword(passwordForm.current, passwordForm.newPass);
       setPassFeedback({ type: "success", msg: "Password updated successfully" });
       setPasswordForm({ current: "", newPass: "", confirm: "" });
-    }, 1000);
+    } catch (e: any) {
+      setPassFeedback({ type: "error", msg: e.message || "Failed to update password" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const sections = [
@@ -255,12 +258,12 @@ export default function SettingsPage() {
                         try {
                           const res = await api.setupMfa();
                           setMfaSetup({ secret: res.secret, qr_uri: res.qr_code });
-                        } catch {}
+                        } catch (e) { console.error("MFA setup", e); }
                       } else {
                         try {
                           await api.disableMfa();
                           setMfaEnabled(false);
-                        } catch {}
+                        } catch (e) { console.error("MFA disable", e); }
                       }
                     }}
                     className={`w-9 h-5 rounded-full relative transition-colors duration-200 focus:outline-none ${mfaEnabled ? 'bg-[var(--text-primary)]' : 'bg-[var(--surface-3)]'}`}
@@ -273,13 +276,13 @@ export default function SettingsPage() {
                     <p className="text-[13px] font-medium tracking-body text-[var(--text-primary)]">Scan Authenticator QR code</p>
                     <div className="flex flex-col sm:flex-row gap-5">
                       <div className="w-24 h-24 bg-white p-1 rounded-md flex-shrink-0">
-                         <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(mfaSetup.qr_uri)}`} alt="QR Code" className="w-full h-full" />
+                         <Image src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(mfaSetup.qr_uri)}`} alt="QR Code" width={96} height={96} className="w-full h-full" unoptimized />
                       </div>
                       <div className="flex-1 space-y-3">
                         <p className="text-[12px] text-[var(--text-secondary)]">Secret token: <span className="text-[var(--text-primary)] font-mono font-medium">{mfaSetup.secret}</span></p>
                         <input type="text" placeholder="Enter 6-digit MFA Code" value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} className="input" />
                         <button onClick={async () => {
-                           try { await api.verifyMfa(mfaCode); setMfaEnabled(true); setMfaSetup(null); setMfaCode(""); } catch { alert("Invalid authorization code"); }
+                            try { await api.verifyMfa(mfaCode); setMfaEnabled(true); setMfaSetup(null); setMfaCode(""); } catch (e) { console.error("MFA verify", e); toast("error", "Invalid authorization code"); }
                         }} className="btn-primary text-[12px]">Verify & Enable</button>
                       </div>
                     </div>
@@ -391,17 +394,17 @@ export default function SettingsPage() {
                   { key: "agent_error", label: "Agent Error", desc: "When an agent encounters an error" },
                   { key: "run_failed", label: "Run Failed", desc: "When a workflow run fails" },
                   { key: "weekly_report", label: "Weekly Report", desc: "Receive weekly summary of system activity" },
-                ].map((n) => (
+                ].map((n: { key: keyof typeof notifications; label: string; desc: string }) => (
                   <div key={n.key} className="flex items-center justify-between py-4 border-b border-[rgba(255,255,255,0.04)] last:border-b-0">
                     <div>
                       <p className="text-[14px] font-medium tracking-body text-[var(--text-primary)]">{n.label}</p>
                       <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{n.desc}</p>
                     </div>
                     <button
-                      onClick={() => setNotifications((prev) => ({ ...prev, [n.key]: !(prev as any)[n.key] }))}
-                      className={`w-9 h-5 rounded-full relative transition-colors duration-200 focus:outline-none flex-shrink-0 ${(notifications as any)[n.key] ? 'bg-[var(--text-primary)]' : 'bg-[var(--surface-3)]'}`}
+                      onClick={() => setNotifications((prev) => ({ ...prev, [n.key]: !prev[n.key] }))}
+                      className={`w-9 h-5 rounded-full relative transition-colors duration-200 focus:outline-none flex-shrink-0 ${notifications[n.key] ? 'bg-[var(--text-primary)]' : 'bg-[var(--surface-3)]'}`}
                     >
-                      <div className={`w-3.5 h-3.5 bg-[var(--void)] rounded-full absolute top-[3px] transition-transform duration-200 shadow-sm ${(notifications as any)[n.key] ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                      <div className={`w-3.5 h-3.5 bg-[var(--void)] rounded-full absolute top-[3px] transition-transform duration-200 shadow-sm ${notifications[n.key] ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                     </button>
                   </div>
                 ))}

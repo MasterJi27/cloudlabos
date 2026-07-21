@@ -2,13 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, Search, Play, GitBranch, Clock, CheckCircle2, X, Loader2,
   ArrowLeft, Save, PlusCircle, Trash2, Edit2, AlertCircle
 } from "lucide-react";
 import { useStore } from "@/store";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/Toast";
+import { EmptyState } from "@/components/ui/EmptyState";
 import ReactFlow, {
   Background, Controls, useNodesState, useEdgesState, addEdge, Connection, Edge, Node
 } from "reactflow";
@@ -71,7 +73,9 @@ const defaultWfEdges: Record<string, Edge[]> = {
 };
 
 export default function WorkflowsPage() {
+  const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isClient, setIsClient] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
@@ -88,14 +92,22 @@ export default function WorkflowsPage() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [nodeLabel, setNodeLabel] = useState("");
 
-  const { workflows, fetchWorkflows, fetchExecuteWorkflow, isAuthenticated } = useStore();
+  const { workflows, fetchWorkflows, fetchExecuteWorkflow, isAuthenticated, currentWorkspace } = useStore();
 
   useEffect(() => {
     setIsClient(true);
-    if (isAuthenticated) {
-      fetchWorkflows();
+  }, []);
+
+  useEffect(() => {
+    if (currentWorkspace) fetchWorkflows();
+  }, [currentWorkspace, fetchWorkflows]);
+
+  useEffect(() => {
+    if (searchParams?.get("new") === "1") {
+      setIsModalOpen(true);
+      router.replace("/workflows");
     }
-  }, [isAuthenticated, fetchWorkflows]);
+  }, [searchParams, router]);
 
   const filteredWorkflows = workflows.filter((w) =>
     w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -110,14 +122,14 @@ export default function WorkflowsPage() {
     if (!newWfName) return;
     setCreating(true);
     try {
-      const { api } = await import("@/lib/api");
-      await api.createWorkflow("ws_prod", { name: newWfName, description: newWfDesc, definition: {} });
+      await api.createWorkflow(currentWorkspace || "ws_prod", { name: newWfName, description: newWfDesc, definition: {} });
       await fetchWorkflows();
       setIsModalOpen(false);
       setNewWfName("");
       setNewWfDesc("");
-    } catch {
-      alert("Failed to create workflow");
+    } catch (e) {
+      console.error("createWorkflow", e);
+      toast("error", "Failed to create workflow");
     } finally {
       setCreating(false);
     }
@@ -205,7 +217,17 @@ export default function WorkflowsPage() {
               <PlusCircle className="w-3.5 h-3.5 mr-1.5" /> Add Node
             </button>
             <button 
-              onClick={() => { setEditingWorkflow(null); }}
+              onClick={async () => { 
+                try {
+                  const steps = nodes.map(n => ({ id: n.id, label: n.data.label, type: n.id === '1' ? 'input' : n.type === 'output' ? 'output' : 'default' }));
+                  await api.updateWorkflow(editingWorkflow.id, { definition: { nodes, edges } } as any);
+                  await fetchWorkflows();
+                  toast("success", "Workflow saved");
+                  setEditingWorkflow(null);
+                } catch (e) {
+                  toast("error", "Failed to save workflow");
+                }
+              }}
               className="btn-primary"
             >
               <Save className="w-3.5 h-3.5" /> Save Changes
@@ -406,8 +428,9 @@ export default function WorkflowsPage() {
                         try {
                           await fetchExecuteWorkflow(workflow.id);
                           router.push("/runs");
-                        } catch {
-                          alert("Failed to execute workflow");
+                        } catch (e) {
+                          console.error("fetchExecuteWorkflow", e);
+                          toast("error", "Failed to execute workflow");
                         }
                       }}
                       className="btn-primary h-8 text-[12px] px-4"
@@ -425,7 +448,7 @@ export default function WorkflowsPage() {
                         e.stopPropagation();
                         setPublishingId(workflow.id);
                         try { await api.publishWorkflow(workflow.id); await fetchWorkflows(); }
-                        catch { alert("Unable to publish workflow. Check your workspace role and API connection."); }
+                        catch { toast("error", "Unable to publish workflow. Check your workspace role and API connection."); }
                         finally { setPublishingId(null); }
                       }}
                       disabled={publishingId === workflow.id}
@@ -439,8 +462,8 @@ export default function WorkflowsPage() {
                         e.stopPropagation();
                         const cron = window.prompt("Cron schedule (UTC), e.g. 0 9 * * 1-5");
                         if (!cron) return;
-                        try { await api.createWorkflowSchedule(workflow.id, cron); alert("Schedule created."); }
-                        catch { alert("Unable to create schedule. Use a valid cron expression."); }
+                        try { await api.createWorkflowSchedule(workflow.id, cron); toast("success", "Schedule created."); }
+                        catch { toast("error", "Unable to create schedule. Use a valid cron expression."); }
                       }}
                       className="btn-ghost h-8 text-[12px] px-3"
                     >
@@ -452,11 +475,19 @@ export default function WorkflowsPage() {
             </motion.div>
           );
         })}
-        {filteredWorkflows.length === 0 && (
-          <div className="col-span-full text-center py-24 text-[var(--text-tertiary)] border border-[rgba(255,255,255,0.04)] border-dashed rounded-xl">
-            <GitBranch className="w-8 h-8 mx-auto mb-4 opacity-40" />
-            <p className="text-[14px] font-medium text-[var(--text-secondary)]">No workflows found</p>
-          </div>
+        {workflows.length === 0 ? (
+          <EmptyState
+            icon={<GitBranch className="w-7 h-7" />}
+            title="No workflows yet"
+            description="Create your first workflow to automate AI agent tasks and chain operations."
+            action={<button onClick={() => setIsModalOpen(true)} className="btn-primary"><Plus className="w-4 h-4" /> Create Workflow</button>}
+          />
+        ) : filteredWorkflows.length === 0 && (
+          <EmptyState
+            icon={<Search className="w-7 h-7" />}
+            title="No matching workflows"
+            description="No workflows match your search or filter. Try different keywords."
+          />
         )}
       </div>
 

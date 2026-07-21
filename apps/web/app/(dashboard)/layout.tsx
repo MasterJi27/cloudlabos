@@ -1,14 +1,25 @@
 "use client";
 
-import { useState, useEffect, useRef, ReactNode } from "react";
+import { Component, useState, useEffect, useRef, ReactNode } from "react";
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    return this.state.hasError
+      ? <div className="flex items-center justify-center min-h-[200px] text-[var(--text-secondary)] text-sm">Something went wrong</div>
+      : this.props.children;
+  }
+}
 import {
   LayoutDashboard, Workflow, Play, Shield, Database, Cpu,
   Terminal, Globe, Plug, BarChart3, FileText, Settings, Bell, Search,
   ChevronLeft, LogOut, CreditCard, Mail, Webhook, ChevronDown,
   X, ChevronRight, Check, AlertTriangle, Zap,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useStore } from "@/store";
+import { useAuthStore } from "@/lib/store";
 import { motion, AnimatePresence } from "framer-motion";
 
 const navGroups = [
@@ -75,7 +86,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const pathname = usePathname() || "/";
   const router = useRouter();
-  const { user, logout, workspaces, currentWorkspace } = useStore();
+  const { user, logout, workspaces, currentWorkspace } = useAuthStore();
 
   useEffect(() => setMounted(true), []);
 
@@ -95,7 +106,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!mounted) return <div className="min-h-screen bg-[var(--void)]" />;
 
   const handleWorkspaceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    useStore.setState({ currentWorkspace: e.target.value });
+    useAuthStore.getState().setCurrentWorkspace(e.target.value);
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -130,7 +141,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               </div>
               <div className="flex-1 min-w-0 flex items-center relative group">
                 <select
-                  value={currentWorkspace || "ws_prod"}
+                  value={currentWorkspace || ""}
                   onChange={handleWorkspaceChange}
                   className="w-full bg-transparent text-[13px] font-medium tracking-body text-[var(--text-primary)] focus:outline-none cursor-pointer pr-4 appearance-none"
                 >
@@ -161,7 +172,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 {group.items.map((item) => {
                   const isActive = pathname === item.path || (item.path !== "/" && pathname.startsWith(item.path));
                   return (
-                    <a
+                    <Link
                       key={item.path}
                       href={item.path}
                       title={collapsed ? item.label : undefined}
@@ -173,7 +184,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     >
                       <item.icon className="w-4 h-4 flex-shrink-0" />
                       {!collapsed && <span className="truncate">{item.label}</span>}
-                    </a>
+                    </Link>
                   );
                 })}
               </div>
@@ -292,7 +303,21 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <div className="min-h-[calc(100vh-56px)] bg-[var(--void)]">{children}</div>
+        <div className="min-h-[calc(100vh-56px)] bg-[var(--void)]">
+          <ErrorBoundary>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15, ease: "easeInOut" }}
+              >
+                {children}
+              </motion.div>
+            </AnimatePresence>
+          </ErrorBoundary>
+        </div>
       </div>
     </div>
   );

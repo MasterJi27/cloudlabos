@@ -6,6 +6,10 @@
   :root {
     /* surface ladder — luminance does the elevation work, not shadow softness */
     --void: #0a0a0a;
+    --bg: var(--void);
+    --bg-secondary: #151515;
+    --bg-tertiary: #1a1a1a;
+    --border: rgba(255, 255, 255, 0.1);
     --surface-1: rgba(255, 255, 255, 0.03);   /* cards, resting */
     --surface-2: rgba(255, 255, 255, 0.05);   /* hover, active row */
     --surface-3: rgba(255, 255, 255, 0.07);   /* popover, modal, command palette */
@@ -26,6 +30,8 @@
     --accent: oklch(72% 0.12 190);       /* mineral teal, dark tuned */
     --accent-foreground: #0a0a0a;
     --focus-ring: oklch(72% 0.18 240);   /* distinct from accent, accessibility only */
+    --accent-light: oklch(80% 0.08 190); /* lighter accent for backgrounds */
+    --font-geist-mono: "Geist Mono", monospace;
 
     /* status colors - strict */
     --danger: #ef4444;
@@ -148,7 +154,7 @@ html, body {
 /* Inputs */
 .input, select, textarea {
   width: 100%;
-  padding: 0.45rem 0.7rem;
+  padding: 0.6rem 0.75rem;
   background: var(--surface-1);
   box-shadow: var(--edge-subtle);
   border: none;

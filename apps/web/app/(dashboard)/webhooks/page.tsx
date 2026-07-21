@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { api } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
+import { useToast } from "@/components/ui/Toast";
 import { 
   Webhook, Plus, Trash2, Play, CheckCircle2, 
   XCircle, Clock, Activity, X, Check
@@ -70,8 +73,11 @@ const initialDeliveries: DeliveryAttempt[] = [
 ];
 
 export default function WebhooksPage() {
-  const [webhooks, setWebhooks] = useState<WebhookEntry[]>(initialWebhooks);
-  const [deliveries, setDeliveries] = useState<DeliveryAttempt[]>(initialDeliveries);
+  const { toast } = useToast();
+  const currentWorkspace = useAuthStore((s) => s.currentWorkspace);
+  const [webhooks, setWebhooks] = useState<WebhookEntry[]>([]);
+  const [deliveries, setDeliveries] = useState<DeliveryAttempt[]>([]);
+  const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -82,18 +88,43 @@ export default function WebhooksPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testFeedback, setTestFeedback] = useState<Record<string, 'success' | 'error'>>({});
 
-  const handleRegister = () => {
-    if (!newName || !newUrl || newEvents.length === 0) return;
-    const newWebhook: WebhookEntry = {
-      id: Date.now().toString(),
-      name: newName,
-      url: newUrl,
-      events: newEvents,
-      active: newActive,
-      lastTriggered: null
+  useEffect(() => {
+    if (!currentWorkspace) return;
+    const load = async () => {
+      try {
+        const data = await api.listWebhooks(currentWorkspace) as any[];
+        setWebhooks(data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          url: d.url,
+          events: d.events,
+          active: d.active,
+          lastTriggered: d.created_at || null,
+        })));
+        setDeliveries(initialDeliveries);
+      } catch (e) {
+        setWebhooks(initialWebhooks);
+        setDeliveries(initialDeliveries);
+      } finally {
+        setLoading(false);
+      }
     };
-    setWebhooks([newWebhook, ...webhooks]);
-    closeModal();
+    load();
+  }, [currentWorkspace]);
+
+  const handleRegister = async () => {
+    if (!newName || !newUrl || newEvents.length === 0 || !currentWorkspace) return;
+    try {
+      const created = await api.createWebhook(currentWorkspace, { name: newName, url: newUrl, events: newEvents }) as any;
+      if (!newActive) {
+        await api.updateWebhook(created.id, { active: false });
+        created.active = false;
+      }
+      setWebhooks([{ id: created.id, name: created.name, url: created.url, events: created.events, active: created.active, lastTriggered: null }, ...webhooks]);
+      closeModal();
+    } catch (e: any) {
+      toast("error", e.message || "Failed to register webhook");
+    }
   };
 
   const closeModal = () => {
@@ -104,20 +135,37 @@ export default function WebhooksPage() {
     setNewActive(true);
   };
 
-  const toggleWebhook = (id: string) => {
-    setWebhooks(prev => prev.map(w => w.id === id ? { ...w, active: !w.active } : w));
+  const toggleWebhook = async (id: string) => {
+    const target = webhooks.find(w => w.id === id);
+    if (!target) return;
+    const nextActive = !target.active;
+    setWebhooks(prev => prev.map(w => w.id === id ? { ...w, active: nextActive } : w));
+    try {
+      await api.updateWebhook(id, { active: nextActive });
+    } catch (e: any) {
+      setWebhooks(prev => prev.map(w => w.id === id ? { ...w, active: !nextActive } : w));
+      toast("error", e.message || "Failed to update webhook");
+    }
   };
 
-  const deleteWebhook = (id: string) => {
-    setWebhooks(prev => prev.filter(w => w.id !== id));
+  const deleteWebhook = async (id: string) => {
+    const prev = webhooks;
+    setWebhooks(prev.filter(w => w.id !== id));
+    try {
+      await api.deleteWebhook(id);
+    } catch (e: any) {
+      setWebhooks(prev);
+      toast("error", e.message || "Failed to delete webhook");
+    }
   };
 
-  const testWebhook = (id: string) => {
+  const testWebhook = async (id: string) => {
     setTestingId(id);
-    setTimeout(() => {
-      const isSuccess = Math.random() > 0.3; // 70% success rate for simulation
+    try {
+      const result = await api.testWebhook(id);
+      const isSuccess = result.status === "success";
       setTestFeedback(prev => ({ ...prev, [id]: isSuccess ? 'success' : 'error' }));
-      
+
       const wh = webhooks.find(w => w.id === id);
       if (wh) {
         const newDelivery: DeliveryAttempt = {
@@ -126,14 +174,14 @@ export default function WebhooksPage() {
           eventType: "test.event",
           statusCode: isSuccess ? 200 : 500,
           timestamp: new Date().toISOString(),
-          responseTime: Math.floor(Math.random() * 500) + 50
+          responseTime: parseInt(result.duration, 10) || 0,
         };
         setDeliveries(prev => [newDelivery, ...prev].slice(0, 5));
-        
-        // Update last triggered
         setWebhooks(prev => prev.map(w => w.id === id ? { ...w, lastTriggered: new Date().toISOString() } : w));
       }
-
+    } catch (e: any) {
+      toast("error", e.message || "Failed to test webhook");
+    } finally {
       setTimeout(() => {
         setTestFeedback(prev => {
           const next = { ...prev };
@@ -142,7 +190,7 @@ export default function WebhooksPage() {
         });
         setTestingId(null);
       }, 3000);
-    }, 1000);
+    }
   };
 
   return (

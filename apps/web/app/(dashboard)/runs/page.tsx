@@ -3,11 +3,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Play, Pause, ChevronRight, Clock, CheckCircle2, XCircle, Brain, Workflow, Timer, X, Loader2,
+  Play, Pause, ChevronRight, Clock, CheckCircle2, XCircle, Brain, Workflow, Timer, X, Loader2, Filter,
 } from "lucide-react";
 import { useStore } from "@/store";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
 import { Tabs } from "@/components/Tabs";
+import { useToast } from "@/components/ui/Toast";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Pagination } from "@/components/ui/Pagination";
 
 const statusConfig: Record<string, { color: string; bg: string; icon: React.ElementType; label: string }> = {
   running: { color: "text-[var(--text-primary)]", bg: "bg-[var(--surface-2)] shadow-[var(--edge-subtle)]", icon: Play, label: "Running" },
@@ -27,6 +30,7 @@ const stepDot: Record<string, string> = {
 };
 
 export default function RunsPage() {
+  const { toast } = useToast();
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [runSteps, setRunSteps] = useState<Record<string, Array<{ name: string; status: string; duration: string }>>>({});
@@ -35,21 +39,28 @@ export default function RunsPage() {
   const [selectedWfId, setSelectedWfId] = useState("");
   const [executing, setExecuting] = useState(false);
   const [cancellingRun, setCancellingRun] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const { 
     activeRuns, runHistory, fetchRuns, fetchRunSteps, 
-    workflows, fetchWorkflows, fetchExecuteWorkflow, fetchCancelRun, isAuthenticated 
+    workflows, fetchWorkflows, fetchExecuteWorkflow, fetchCancelRun, isAuthenticated, 
+    currentWorkspace 
   } = useStore();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (currentWorkspace) {
       fetchRuns();
       fetchWorkflows();
     }
-  }, [isAuthenticated, fetchRuns, fetchWorkflows]);
+  }, [currentWorkspace, fetchRuns, fetchWorkflows]);
+
+  useEffect(() => { setPage(1); }, [filter]);
 
   const allRuns = [...activeRuns, ...runHistory];
   const filteredRuns = filter === "all" ? allRuns : allRuns.filter((r) => r.status === filter);
+  const totalPages = Math.ceil(filteredRuns.length / PAGE_SIZE);
+  const paginatedRuns = filteredRuns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleSelectRun = async (runId: string) => {
     if (selectedRun === runId) { setSelectedRun(null); return; }
@@ -58,7 +69,7 @@ export default function RunsPage() {
       const steps = await fetchRunSteps(runId);
       setRunSteps((prev) => ({
         ...prev,
-        [runId]: steps.map((s) => ({
+        [runId]: steps.map((s: any) => ({
           name: s.name,
           status: s.status,
           duration: s.completed_at && s.started_at
@@ -78,8 +89,9 @@ export default function RunsPage() {
       await fetchRuns();
       setIsModalOpen(false);
       setSelectedWfId("");
-    } catch {
-      alert("Failed to execute workflow");
+    } catch (e) {
+      console.error("fetchExecuteWorkflow", e);
+      toast("error", "Failed to execute workflow");
     } finally {
       setExecuting(false);
     }
@@ -89,8 +101,9 @@ export default function RunsPage() {
     setCancellingRun(runId);
     try {
       await fetchCancelRun(runId);
-    } catch {
-      alert("Unable to cancel this run. Refresh and try again.");
+    } catch (e) {
+      console.error("fetchCancelRun", e);
+      toast("error", "Unable to cancel this run. Refresh and try again.");
     } finally {
       setCancellingRun(null);
     }
@@ -130,9 +143,9 @@ export default function RunsPage() {
         </div>
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2">Avg Duration</div>
-          <div className="metric-value text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">
-            14s
-          </div>
+              <div className="metric-value text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">
+                <AnimatedCounter value={allRuns.filter(r => r.completed_at && r.started_at).length > 0 ? Math.round(allRuns.filter(r => r.completed_at && r.started_at).reduce((sum, r) => sum + (new Date(r.completed_at!).getTime() - new Date(r.started_at!).getTime()) / 1000, 0) / allRuns.filter(r => r.completed_at && r.started_at).length) : 0} />s
+              </div>
         </div>
         <div>
           <div className="text-[13px] font-medium text-[var(--text-secondary)] tracking-body mb-2 flex items-center gap-1.5">Active Now <Play className="w-3.5 h-3.5 text-[var(--text-tertiary)]" /></div>
@@ -157,7 +170,7 @@ export default function RunsPage() {
       </div>
 
       <div className="space-y-3">
-        {filteredRuns.map((run, idx) => {
+        {paginatedRuns.map((run, idx) => {
           const config = statusConfig[run.status] || statusConfig.pending;
           return (
             <motion.div
@@ -180,7 +193,7 @@ export default function RunsPage() {
                     </div>
                     <div className="flex items-center gap-4 mt-1.5 text-[12px] font-mono text-[var(--text-tertiary)]">
                       <span className="flex items-center gap-1.5"><Workflow className="w-3.5 h-3.5" />{run.workflow_id}</span>
-                      <span className="flex items-center gap-1.5"><Play className="w-3.5 h-3.5" />{run.trigger_type}</span>
+                      <span className="flex items-center gap-1.5"><Play className="w-3.5 h-3.5" />{run.trigger}</span>
                       {run.started_at && (
                         <span className="flex items-center gap-1.5"><Timer className="w-3.5 h-3.5" />{new Date(run.started_at).toLocaleString()}</span>
                       )}
@@ -227,7 +240,7 @@ export default function RunsPage() {
                   </div>
                   <div className="flex items-center gap-3 overflow-x-auto pb-2">
                     {runSteps[run.id].map((step, i) => (
-                      <div key={i} className="flex items-center gap-3">
+                      <div key={`${step.name}-${i}`} className="flex items-center gap-3">
                         <div className="flex flex-col items-center">
                           <div className={`w-3 h-3 rounded-full shadow-[var(--edge-subtle)] ${stepDot[step.status] || "bg-[var(--surface-3)]"}`} />
                           <span className="text-[11px] font-medium tracking-body text-[var(--text-secondary)] mt-2 whitespace-nowrap">{step.name}</span>
@@ -244,12 +257,21 @@ export default function RunsPage() {
             </motion.div>
           );
         })}
-        {filteredRuns.length === 0 && (
-          <div className="text-center py-24 text-[var(--text-tertiary)] border border-[rgba(255,255,255,0.04)] border-dashed rounded-xl">
-            <Play className="w-8 h-8 mx-auto mb-4 opacity-40" />
-            <p className="text-[14px] font-medium tracking-body text-[var(--text-secondary)]">No runs found</p>
-          </div>
+        {allRuns.length === 0 ? (
+          <EmptyState
+            icon={<Play className="w-7 h-7" />}
+            title="No workflow runs yet"
+            description="Execute a workflow to see run history, step timelines, and success/failure metrics."
+            action={<button onClick={() => setIsModalOpen(true)} className="btn-primary"><Play className="w-4 h-4" /> Run a Workflow</button>}
+          />
+        ) : filteredRuns.length === 0 && (
+          <EmptyState
+            icon={<Filter className="w-7 h-7" />}
+            title="No matching runs"
+            description="No runs match the current filter. Try selecting a different status."
+          />
         )}
+        <Pagination page={page} totalPages={totalPages} totalItems={filteredRuns.length} pageSize={PAGE_SIZE} onChange={setPage} />
       </div>
 
       <AnimatePresence>
@@ -278,7 +300,7 @@ export default function RunsPage() {
                   >
                     <option value="">-- Choose a workflow --</option>
                     {workflows.map(wf => (
-                      <option key={wf.id} value={wf.id}>{wf.name} (v{wf.version})</option>
+                      <option key={wf.id} value={wf.id}>{wf.name}</option>
                     ))}
                   </select>
                 </div>

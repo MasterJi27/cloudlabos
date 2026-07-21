@@ -2,41 +2,39 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useStore } from "@/store";
-import { Cpu } from "lucide-react";
+import { useAuthStore } from "@/lib/store";
+import { Spinner } from "@/components/ui/Spinner";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
-  const { isAuthenticated, fetchMe } = useStore();
+  const { isAuthenticated, fetchMe, loading } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    fetchMe().finally(() => setMounted(true));
-  }, []);
+    fetchMe().finally(() => setMounted(true)).catch(() => {});
+  }, [fetchMe]);
 
   useEffect(() => {
-    if (mounted && !isAuthenticated && pathname !== "/login") {
-      router.replace("/login");
+    if (mounted && !loading) {
+      if (!isAuthenticated && pathname !== "/login") {
+        router.replace("/login");
+      }
+      if (isAuthenticated && pathname === "/login") {
+        router.replace("/");
+      }
     }
-  }, [mounted, isAuthenticated, pathname]);
+  }, [mounted, loading, isAuthenticated, pathname, router]);
 
-  if (!mounted) {
+  if (!mounted || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-        <div className="flex flex-col items-center gap-3">
-          <Cpu className="w-6 h-6 text-[var(--accent)] animate-pulse" />
-          <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-[var(--void)]">
+        <Spinner size="lg" label="Initializing CloudLabOS..." />
       </div>
     );
   }
 
-  if (pathname === "/login") {
-    return <>{children}</>;
-  }
-
-  if (!isAuthenticated) {
+  if (!isAuthenticated && pathname !== "/login") {
     return null;
   }
 

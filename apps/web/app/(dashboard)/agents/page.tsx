@@ -2,12 +2,17 @@
 
 import { useState, useEffect } from "react";
 import {
-  Brain, Cpu, Activity, CheckCircle2, XCircle, Pause, Eye, Shield, GitBranch, Terminal, Database,
-  Plus, X, Loader2, Play, Power, Trash2, Search, Filter
+  Brain, Cpu, CheckCircle2, XCircle, Pause, GitBranch, Terminal, Database,
+  Plus, X, Loader2, Trash2, Search, Filter, Play
 } from "lucide-react";
 import { useStore, Agent } from "@/store";
+import { useAgentsStore } from "@/lib/store";
+import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { useToast } from "@/components/ui/Toast";
+import { Pagination } from "@/components/ui/Pagination";
 
 const MetricCard = ({ label, value, trend, trendUp }: { label: string, value: string | number, trend: string, trendUp?: boolean }) => (
   <div>
@@ -27,17 +32,68 @@ const MetricCard = ({ label, value, trend, trendUp }: { label: string, value: st
 
 export default function AgentsGrid() {
   const router = useRouter();
+  const { toast } = useToast();
   const { agents, fetchAgents, currentWorkspace } = useStore();
+  const { deleteAgent } = useAgentsStore();
   const [isClient, setIsClient] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [bulkWorking, setBulkWorking] = useState(false);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     setIsClient(true);
-    fetchAgents();
-  }, [fetchAgents]);
+  }, []);
+
+  useEffect(() => {
+    if (currentWorkspace) fetchAgents();
+  }, [currentWorkspace, fetchAgents]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredAgents.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredAgents.map(a => a.id)));
+    }
+  };
+
+  useEffect(() => { setPage(1); }, [searchQuery]);
+
+  const runBulkAction = async (action: "pause" | "restart" | "delete") => {
+    const ids = Array.from(selectedIds);
+    setBulkWorking(true);
+    setSelectedIds(new Set());
+    try {
+      if (action === "delete") {
+        await Promise.all(ids.map((id) => deleteAgent(id)));
+        toast("success", `${ids.length} agent(s) deleted`);
+      } else {
+        const status = action === "pause" ? "idle" : "active";
+        await Promise.all(ids.map((id) => api.updateAgent(id, { status })));
+        toast("success", `${ids.length} agent(s) ${action === "pause" ? "paused" : "restarted"}`);
+        if (currentWorkspace) await fetchAgents();
+      }
+    } catch (e: any) {
+      toast("error", e.message || `Failed to ${action} agents`);
+    } finally {
+      setBulkWorking(false);
+    }
+  };
 
   const activeCount = agents.filter(a => a.status === 'active' || a.status === 'busy').length;
   const filteredAgents = agents.filter(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()) || a.id.includes(searchQuery));
+  const selectedCount = selectedIds.size;
+  const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
+  const paginatedAgents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="max-w-7xl mx-auto pb-24 px-6 md:px-12 pt-12 animate-fade-in">
@@ -53,7 +109,7 @@ export default function AgentsGrid() {
             <GitBranch className="w-4 h-4 text-[var(--text-tertiary)]" />
             Provision Node
           </button>
-          <button className="btn-primary" onClick={() => router.push('/workflows/new')}>
+          <button className="btn-primary" onClick={() => router.push('/agents/provision')}>
             <Plus className="w-4 h-4" />
             New Agent
           </button>
@@ -86,9 +142,29 @@ export default function AgentsGrid() {
         </button>
       </div>
 
+      {/* Bulk Actions */}
+      {selectedCount > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-[var(--surface-1)] shadow-[var(--edge-subtle)] rounded-lg animate-fade-in">
+          <span className="text-[13px] text-[var(--text-primary)] font-medium">{selectedCount} selected</span>
+          <div className="w-px h-4 bg-[rgba(255,255,255,0.06)]" />
+          <button disabled={bulkWorking} onClick={() => runBulkAction("pause")} className="btn-ghost text-[12px] h-7 px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
+            <GitBranch className="w-3.5 h-3.5 mr-1" /> Pause
+          </button>
+          <button disabled={bulkWorking} onClick={() => runBulkAction("restart")} className="btn-ghost text-[12px] h-7 px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
+            <Play className="w-3.5 h-3.5 mr-1" /> Restart
+          </button>
+          <button disabled={bulkWorking} onClick={() => runBulkAction("delete")} className="btn-ghost text-[12px] h-7 px-2 text-[var(--danger)] hover:bg-[var(--danger)]/10 disabled:opacity-50">
+            <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+          </button>
+        </div>
+      )}
+
       {/* Agents List (Borderless Table style) */}
       <div className="w-full">
         <div className="flex border-b border-[rgba(255,255,255,0.08)] text-[12px] font-medium text-[var(--text-tertiary)] tracking-micro pb-3 px-4">
+          <div className="w-8 flex items-center">
+            <input type="checkbox" checked={selectedIds.size === filteredAgents.length && filteredAgents.length > 0} onChange={toggleSelectAll} className="accent-[var(--text-primary)]" />
+          </div>
           <div className="w-1/3">Agent / Model</div>
           <div className="w-1/4">Current Task</div>
           <div className="w-1/6">Metrics</div>
@@ -96,9 +172,13 @@ export default function AgentsGrid() {
         </div>
 
         <div className="divide-y divide-[rgba(255,255,255,0.04)]">
-          {filteredAgents.map((agent) => (
+          {paginatedAgents.map((agent) => (
             <div key={agent.id} className="flex items-center py-5 px-4 -mx-4 rounded-lg hover:bg-[var(--surface-2)] transition-colors group">
               
+              {/* Checkbox */}
+              <div className="w-8 flex items-center">
+                <input type="checkbox" checked={selectedIds.has(agent.id)} onChange={() => toggleSelect(agent.id)} className="accent-[var(--text-primary)]" />
+              </div>
               {/* Identity */}
               <div className="w-1/3 pr-4">
                 <div className="flex items-center gap-3">
@@ -147,13 +227,28 @@ export default function AgentsGrid() {
 
               {/* Actions */}
               <div className="w-1/4 flex justify-end items-center gap-2">
-                <button className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => router.push(`/agents/${agent.id}`)}
+                  title="Open chat"
+                  className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
+                >
                   <Terminal className="w-4 h-4" />
                 </button>
-                <button className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.updateAgent(agent.id, { status: agent.status === "active" ? "idle" : "active" });
+                      if (currentWorkspace) await fetchAgents();
+                    } catch (e: any) {
+                      toast("error", e.message || "Failed to update agent");
+                    }
+                  }}
+                  title={agent.status === "active" ? "Pause agent" : "Activate agent"}
+                  className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
+                >
                   <Pause className="w-4 h-4" />
                 </button>
-                <button 
+                <button
                   onClick={() => router.push(`/agents/${agent.id}`)}
                   className="btn-secondary ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
@@ -163,12 +258,22 @@ export default function AgentsGrid() {
             </div>
           ))}
 
-          {filteredAgents.length === 0 && (
-            <div className="py-16 text-center text-[var(--text-secondary)] text-[14px]">
-              No agents found matching your search.
-            </div>
+          {agents.length === 0 ? (
+            <EmptyState
+              icon={<Brain className="w-7 h-7" />}
+              title="No agents deployed"
+              description="Provision your first AI agent to automate tasks and run workflows."
+              action={<button onClick={() => router.push('/agents/provision')} className="btn-primary"><Plus className="w-4 h-4" /> Deploy Agent</button>}
+            />
+          ) : filteredAgents.length === 0 && (
+            <EmptyState
+              icon={<Search className="w-7 h-7" />}
+              title="No results"
+              description="No agents match your search query. Try different keywords."
+            />
           )}
         </div>
+        <Pagination page={page} totalPages={totalPages} totalItems={filteredAgents.length} pageSize={PAGE_SIZE} onChange={setPage} />
       </div>
 
     </div>

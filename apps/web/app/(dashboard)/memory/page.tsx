@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Database, Search, Plus, Trash2, Eye, Brain, Clock, Tag, CheckCircle2, XCircle, Workflow, X, Loader2
 } from "lucide-react";
-import { useStore, MemoryItem } from "@/store";
+import { useAuthStore, useMemoryStore } from "@/lib/store";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
 import { Tabs } from "@/components/Tabs";
+import { useToast } from "@/components/ui/Toast";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 const contentTypeConfig: Record<string, { color: string; bg: string; label: string; icon: React.ElementType }> = {
   observation: { color: "text-[var(--accent)]", bg: "bg-[var(--accent-light)]", label: "Observation", icon: Eye },
@@ -18,9 +20,11 @@ const contentTypeConfig: Record<string, { color: string; bg: string; label: stri
 };
 
 export default function MemoryPage() {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState("all");
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [content, setContent] = useState("");
@@ -28,68 +32,101 @@ export default function MemoryPage() {
   const [tagsInput, setTagsInput] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { memoryItems, memorySearchResults, fetchMemory, fetchMemorySearch, fetchDeleteMemory, isAuthenticated } = useStore();
+  const currentWorkspace = useAuthStore((s) => s.currentWorkspace);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const { collections, items, searchResults, fetchCollections, fetchItems, createItem, deleteItem, searchItems } = useMemoryStore();
+  const [localItems, setLocalItems] = useState<Array<{ id: string; content: string; content_type: string; source: string; tags: string[]; score: number; created_at: string }>>([]);
+
+  const sourceItems = localItems.length > 0 ? localItems : (searchQuery.trim() ? searchResults : items);
+  const allItems = sourceItems.map((i: any) => ({
+    ...i,
+    tags: i.tags ?? i.metadata?.tags ?? [],
+    content_type: i.content_type ?? i.metadata?.content_type ?? "knowledge",
+  }));
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchMemory();
+    if (currentWorkspace) {
+      fetchCollections(currentWorkspace);
     }
-  }, [isAuthenticated, fetchMemory]);
+  }, [currentWorkspace, fetchCollections]);
+
+  useEffect(() => {
+    if (collections.length > 0 && !selectedCollectionId) {
+      setSelectedCollectionId(collections[0].id);
+      fetchItems(collections[0].id);
+    }
+  }, [collections, selectedCollectionId, fetchItems]);
 
   const handleSearch = async () => {
+    if (!selectedCollectionId) return;
     if (searchQuery.trim()) {
-      await fetchMemorySearch(searchQuery);
-    } else {
-      fetchMemory();
+      await searchItems(selectedCollectionId, searchQuery);
     }
   };
 
-  const handleCreateMemory = (e: React.FormEvent) => {
+  const handleCreateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
     setSaving(true);
-
     try {
-      const newItem: MemoryItem = {
-        id: String(Math.floor(Math.random() * 100000)),
-        content,
-        content_type: contentType as any,
-        source: "Manual Portal Entry",
-        created_at: new Date().toISOString(),
-        score: 1.0,
-        tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean),
-      };
-
-      useStore.setState({
-        memoryItems: [newItem, ...memoryItems]
-      });
-
+      if (selectedCollectionId) {
+        await createItem(selectedCollectionId, {
+          content,
+          source: "Manual Portal Entry",
+          metadata: {
+            content_type: contentType,
+            tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean),
+          },
+        } as any);
+        await fetchItems(selectedCollectionId);
+      } else {
+        setLocalItems((prev) => [{
+          id: String(Math.floor(Math.random() * 100000)),
+          content,
+          content_type: contentType,
+          source: "Manual Portal Entry",
+          created_at: new Date().toISOString(),
+          score: 1.0,
+          tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean),
+        }, ...prev]);
+      }
       setIsModalOpen(false);
       setContent("");
       setTagsInput("");
       setContentType("knowledge");
-    } catch {
-      alert("Failed to save memory item");
+    } catch (e) {
+      console.error("saveMemory", e);
+      toast("error", "Failed to save memory item");
     } finally {
       setSaving(false);
     }
   };
 
-  const displayItems = searchQuery.trim() ? memorySearchResults : memoryItems;
-  const filteredItems = displayItems.filter((item) => {
-    const matchesSearch = item.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
+  const handleDelete = async (itemId: string) => {
+    if (selectedCollectionId) {
+      try {
+        await deleteItem(selectedCollectionId, itemId);
+      } catch (e) {
+        console.error("deleteItem", e);
+      }
+    } else {
+      setLocalItems((prev) => prev.filter((i) => i.id !== itemId));
+    }
+  };
+
+  const filteredItems = allItems.filter((item: any) => {
+    const matchesSearch = item.content.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = selectedType === "all" || item.content_type === selectedType;
     return matchesSearch && matchesType;
   });
 
   const stats = {
-    total: memoryItems.length,
-    observations: memoryItems.filter((i) => i.content_type === "observation").length,
-    knowledge: memoryItems.filter((i) => i.content_type === "knowledge").length,
-    plans: memoryItems.filter((i) => i.content_type === "plan").length,
-    results: memoryItems.filter((i) => i.content_type === "result").length,
-    errors: memoryItems.filter((i) => i.content_type === "error").length,
+    total: allItems.length,
+    knowledge: allItems.filter((i: any) => i.content_type === "knowledge" || !["observation", "plan", "result", "error"].includes(i.content_type)).length,
+    observations: allItems.filter((i: any) => i.content_type === "observation").length,
+    plans: allItems.filter((i: any) => i.content_type === "plan").length,
+    results: allItems.filter((i: any) => i.content_type === "result").length,
+    errors: allItems.filter((i: any) => i.content_type === "error").length,
   };
 
   return (
@@ -99,12 +136,20 @@ export default function MemoryPage() {
           <h1 className="page-heading text-[var(--text-primary)] mb-2">Memory Explorer</h1>
           <p className="text-[14px] text-[var(--text-secondary)]">Semantic search and vector memory management.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Add Memory
-        </button>
+        <div className="flex items-center gap-3">
+          {collections.length > 0 && (
+            <select
+              value={selectedCollectionId || ""}
+              onChange={(e) => { setSelectedCollectionId(e.target.value); fetchItems(e.target.value); }}
+              className="input w-48 text-[12px]"
+            >
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+          <button onClick={() => setIsModalOpen(true)} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Add Memory
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-16">
@@ -136,7 +181,7 @@ export default function MemoryPage() {
             </div>
             <span className="font-mono text-[12px] tabular-nums text-[var(--text-secondary)]">{stats.total.toLocaleString()} vectors</span>
           </div>
-          <div className="h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden" aria-label="Vector index utilization">
+          <div className="h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
             <div className="h-full rounded-full bg-[var(--text-primary)]" style={{ width: `${Math.min(100, Math.max(8, stats.total / 10))}%` }} />
           </div>
         </div>
@@ -179,8 +224,10 @@ export default function MemoryPage() {
       </div>
 
       <div className="space-y-2">
-        {filteredItems.map((item, idx) => {
+        {filteredItems.map((item: any, idx: number) => {
           const config = contentTypeConfig[item.content_type] || contentTypeConfig.observation;
+          const tags = item.tags || [];
+          const score = item.score ?? 1.0;
           return (
             <motion.div
               key={item.id}
@@ -197,11 +244,11 @@ export default function MemoryPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-2 flex-wrap">
                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium tracking-micro ${config.bg} ${config.color}`}>{config.label}</span>
-                    <span className="text-[11px] font-mono text-[var(--text-tertiary)]">Score: {(item.score * 100).toFixed(0)}%</span>
+                    <span className="text-[11px] font-mono text-[var(--text-tertiary)]">Score: {(score * 100).toFixed(0)}%</span>
                   </div>
                   <p className="text-[14px] text-[var(--text-primary)] leading-relaxed line-clamp-2">{item.content}</p>
                   <div className="flex items-center gap-2 mt-3 flex-wrap">
-                    {item.tags.map((tag) => (
+                    {tags.map((tag: string) => (
                       <span key={tag} className="flex items-center gap-1.5 px-2 py-0.5 bg-[var(--surface-2)] shadow-[var(--edge-subtle)] rounded-md text-[11px] font-mono text-[var(--text-secondary)]">
                         <Tag className="w-3 h-3 text-[var(--text-tertiary)]" />{tag}
                       </span>
@@ -212,7 +259,7 @@ export default function MemoryPage() {
                   </div>
                 </div>
                 <button
-                  onClick={(e) => { e.stopPropagation(); fetchDeleteMemory(Number(item.id)); }}
+                  onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
                   className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--danger)]"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -226,22 +273,28 @@ export default function MemoryPage() {
                   className="mt-5 pt-4 border-t border-[rgba(255,255,255,0.04)]"
                 >
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-[12px] font-mono">
-                    <div><span className="text-[var(--text-tertiary)] block mb-1">Source:</span> <span className="text-[var(--text-secondary)]">{item.source}</span></div>
+                    <div><span className="text-[var(--text-tertiary)] block mb-1">Source:</span> <span className="text-[var(--text-secondary)]">{item.source || "-"}</span></div>
                     <div><span className="text-[var(--text-tertiary)] block mb-1">Created:</span> <span className="text-[var(--text-secondary)]">{new Date(item.created_at).toLocaleString()}</span></div>
-                    {item.run_id && <div><span className="text-[var(--text-tertiary)] block mb-1">Run ID:</span> <span className="text-[var(--text-secondary)]">{item.run_id}</span></div>}
-                    {item.workflow_id && <div><span className="text-[var(--text-tertiary)] block mb-1">Workflow:</span> <span className="text-[var(--text-secondary)]">{item.workflow_id}</span></div>}
-                    <div><span className="text-[var(--text-tertiary)] block mb-1">Vector Score:</span> <span className="text-[var(--text-secondary)]">{item.score.toFixed(4)}</span></div>
+                    <div><span className="text-[var(--text-tertiary)] block mb-1">Vector Score:</span> <span className="text-[var(--text-secondary)]">{score.toFixed(4)}</span></div>
                   </div>
                 </motion.div>
               )}
             </motion.div>
           );
         })}
-        {filteredItems.length === 0 && (
-          <div className="text-center py-24 text-[var(--text-tertiary)] border border-[rgba(255,255,255,0.04)] border-dashed rounded-xl">
-            <Database className="w-8 h-8 mx-auto mb-4 opacity-40" />
-            <p className="text-[14px] font-medium tracking-body text-[var(--text-secondary)]">No memory items found</p>
-          </div>
+        {allItems.length === 0 ? (
+          <EmptyState
+            icon={<Brain className="w-7 h-7" />}
+            title="No memory items"
+            description="Memory items store agent observations, knowledge, and results for future reference."
+            action={<button onClick={() => { setContent(""); setContentType("knowledge"); setIsModalOpen(true); }} className="btn-primary"><Plus className="w-4 h-4" /> Add Memory</button>}
+          />
+        ) : filteredItems.length === 0 && (
+          <EmptyState
+            icon={<Search className="w-7 h-7" />}
+            title="No matching items"
+            description="No memory items match your search. Try different keywords."
+          />
         )}
       </div>
 
