@@ -10,6 +10,11 @@ from app.api.v1.approvals import router as approvals_router
 from app.api.v1.billing import router as billing_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.plugins import router as plugins_router
+from app.api.v1.notifications import router as notifications_router
+from app.api.v1.search import router as search_router
+from app.api.v1.dashboard import router as dashboard_router
+from app.api.v1.audit import router as audit_router
+from app.api.v1.research import router as research_router
 
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(auth_router, prefix="/auth", tags=["Authentication"])
@@ -23,3 +28,8 @@ v1_router.include_router(approvals_router, prefix="/approvals", tags=["Approvals
 v1_router.include_router(billing_router, prefix="/billing", tags=["Billing"])
 v1_router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
 v1_router.include_router(plugins_router, prefix="/plugins", tags=["Plugins"])
+v1_router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
+v1_router.include_router(search_router, prefix="/search", tags=["Search"])
+v1_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
+v1_router.include_router(audit_router, prefix="/audit", tags=["Audit"])
+v1_router.include_router(research_router, prefix="/research", tags=["Research"])

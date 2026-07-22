@@ -41,21 +41,30 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const [stats, setStats] = useState<any>(null);
+
   useEffect(() => {
     if (isAuthenticated && currentWorkspace) {
       fetchAgents(currentWorkspace);
       fetchRuns(currentWorkspace);
       fetchWorkflows(currentWorkspace);
       fetchCollections(currentWorkspace);
+      import("@/lib/api").then(({ api }) =>
+        api.getDashboardStats(currentWorkspace).then(setStats).catch(() => setStats(null))
+      );
     }
   }, [isAuthenticated, currentWorkspace, fetchAgents, fetchRuns, fetchWorkflows, fetchCollections]);
 
   const allRuns = [...activeRuns, ...runHistory];
-  const totalRuns = allRuns.length;
-  const successRuns = allRuns.filter((r) => r.status === "success").length;
-  const successRate = totalRuns > 0 ? ((successRuns / totalRuns) * 100).toFixed(1) : "0.0";
-  const activeAgents = agents.filter(a => a.status === "active" || a.status === "busy").length;
-  const totalWorkflows = workflows.length;
+  // Prefer the aggregated stats endpoint (authoritative counts) and fall back to
+  // whatever the list stores have loaded.
+  const totalRuns = stats?.runs?.total ?? allRuns.length;
+  const successRate = stats?.runs?.success_rate != null
+    ? String(stats.runs.success_rate)
+    : (allRuns.length > 0 ? ((allRuns.filter((r) => r.status === "success").length / allRuns.length) * 100).toFixed(1) : "0.0");
+  const activeAgents = stats?.agents?.active ?? agents.filter(a => a.status === "active" || a.status === "busy").length;
+  const totalAgents = stats?.agents?.total ?? agents.length;
+  const totalWorkflows = stats?.workflows?.total ?? workflows.length;
 
   // Build trend data from real runs
   const now = new Date();
@@ -108,14 +117,14 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto pb-24 px-6 md:px-12 pt-12">
-      
+
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-16">
         <div>
           <h1 className="text-[32px] tracking-header-lg font-medium text-[var(--text-primary)] mb-2">Workspace</h1>
           <p className="text-[14px] text-[var(--text-secondary)]">Monitor and orchestrate your autonomous agent fleet.</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full shadow-[var(--edge-subtle)] bg-[var(--surface-1)]">
             <span className={`w-2 h-2 rounded-full ${isDegraded ? "bg-[var(--warning)]" : "bg-[var(--success)]"}`} />
@@ -139,7 +148,7 @@ export default function Dashboard() {
           </div>
           <div className="text-[40px] font-medium tracking-header-lg text-[var(--text-primary)] flex items-end gap-3 font-mono">
             <AnimatedCounter value={activeAgents} />
-            <span className="text-[13px] text-[var(--text-secondary)] font-medium mb-1.5">/ {agents.length} total</span>
+            <span className="text-[13px] text-[var(--text-secondary)] font-medium mb-1.5">/ {totalAgents} total</span>
           </div>
         </div>
         <div>
@@ -193,7 +202,7 @@ export default function Dashboard() {
 
       {/* Navigation Tabs */}
       <div className="mb-10">
-        <Tabs 
+        <Tabs
           activeTab={activeTab}
           onChange={setActiveTab}
           tabs={[
@@ -209,7 +218,7 @@ export default function Dashboard() {
         {/* ===================== OVERVIEW TAB ===================== */}
         {activeTab === "overview" && (
           <div className="space-y-20">
-            
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-16">
               {/* Chart */}
               <div className="lg:col-span-2">
@@ -236,8 +245,8 @@ export default function Dashboard() {
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.06)" />
                         <XAxis dataKey="name" stroke="var(--text-tertiary)" tickLine={false} axisLine={false} dy={10} />
                         <YAxis stroke="var(--text-tertiary)" tickLine={false} axisLine={false} dx={-10} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: "var(--void)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--text-primary)", fontSize: 13, borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }} 
+                        <Tooltip
+                          contentStyle={{ backgroundColor: "var(--void)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--text-primary)", fontSize: 13, borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
                           itemStyle={{ color: "var(--text-primary)" }}
                         />
                         <Area type="monotone" dataKey="success" stroke="var(--text-primary)" strokeWidth={2} fill="url(#colorSuccess)" />
@@ -283,7 +292,7 @@ export default function Dashboard() {
                   View all &rarr;
                 </button>
               </div>
-              
+
               <div className="w-full">
                 <div className="flex border-b border-[rgba(255,255,255,0.08)] text-[12px] font-medium text-[var(--text-tertiary)] tracking-micro pb-3 px-4">
                   <div className="w-1/3">Workflow</div>
@@ -291,7 +300,7 @@ export default function Dashboard() {
                   <div className="w-1/4">Duration</div>
                   <div className="w-1/6 text-right">Status</div>
                 </div>
-                
+
                 <div className="divide-y divide-[rgba(255,255,255,0.04)]">
                   {[...activeRuns, ...runHistory].slice(0, 5).map((run) => (
                     <div key={run.id} className="flex items-center py-4 px-4 -mx-4 rounded-lg hover:bg-[var(--surface-2)] transition-colors group">
@@ -331,7 +340,7 @@ export default function Dashboard() {
         {/* ===================== SYSTEM HEALTH TAB ===================== */}
         {activeTab === "health" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-20">
-            
+
             <div>
               <div className="flex items-center justify-between mb-8 border-b border-[rgba(255,255,255,0.06)] pb-4">
                 <h2 className="text-[15px] font-medium text-[var(--text-primary)] tracking-subheader">Service Uptime</h2>
@@ -395,7 +404,7 @@ export default function Dashboard() {
                 Manage Fleet &rarr;
               </button>
             </div>
-            
+
             <div className="divide-y divide-[rgba(255,255,255,0.04)]">
               {agents.map((agent) => {
                 const memMB = parseInt(agent.memory_usage);

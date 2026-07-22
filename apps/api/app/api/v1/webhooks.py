@@ -1,9 +1,11 @@
+import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import random
+import httpx
 from datetime import datetime, timezone
 from app.database import get_db
 from app.models.user import User
@@ -93,6 +95,36 @@ async def list_deliveries(workspace_id: str = Query(...), user: User = Depends(g
 
 
 @router.post("/{webhook_id}/test")
-async def test_webhook(webhook_id: str, user: User = Depends(get_current_user)):
-    success = random.random() > 0.3
-    return {"status": "success" if success else "failed", "duration": f"{random.randint(100, 2000)}ms"}
+async def test_webhook(webhook_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    webhook = None
+    ws_id = None
+    for wid, hooks in stores.items():
+        for h in hooks:
+            if h["id"] == webhook_id:
+                webhook, ws_id = h, wid
+                break
+        if webhook:
+            break
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    await require_workspace_member(ws_id, user, db)
+
+    payload = {"event": "test.event", "webhook_id": webhook_id, "triggered_by": user.email,
+               "timestamp": datetime.now(timezone.utc).isoformat()}
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(webhook["url"], json=payload)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        status_ = "success" if resp.status_code < 400 else "failed"
+    except Exception:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        status_ = "failed"
+
+    delivery = {
+        "id": str(uuid.uuid4()), "webhook_id": webhook_id, "event": "test.event",
+        "status": status_, "duration": f"{duration_ms}ms",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    deliveries.setdefault(ws_id, []).insert(0, delivery)
+    return {"status": status_, "duration": f"{duration_ms}ms"}

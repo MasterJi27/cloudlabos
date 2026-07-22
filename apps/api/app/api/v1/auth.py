@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.schemas.auth import (
     LoginRequest, RegisterRequest, TokenResponse, RefreshRequest,
     MFASetupResponse, MFAVerifyRequest, PasswordResetRequest,
 )
-from app.schemas.user import UserResponse, APIKeyCreate, APIKeyCreated
+from app.schemas.user import UserResponse, APIKeyCreate, APIKeyCreated, APIKeyResponse, SessionResponse
 from app.services.auth import AuthService
 from app.core.security import get_current_user
 from app.models.user import User
@@ -13,22 +13,30 @@ from app.models.user import User
 router = APIRouter()
 
 
+def _client_info(request: Request) -> tuple[str, str]:
+    ip = request.client.host if request.client else ""
+    user_agent = request.headers.get("user-agent", "")
+    return ip, user_agent
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     svc = AuthService(db)
+    ip, user_agent = _client_info(request)
     try:
         user = await svc.register(body.email, body.password, body.name)
-        access, refresh, _ = await svc.login(body.email, body.password)
+        access, refresh, _ = await svc.login(body.email, body.password, ip, user_agent)
         return TokenResponse(access_token=access, refresh_token=refresh, user=_user_dict(user))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     svc = AuthService(db)
+    ip, user_agent = _client_info(request)
     try:
-        access, refresh, user = await svc.login(body.email, body.password)
+        access, refresh, user = await svc.login(body.email, body.password, ip, user_agent)
         return TokenResponse(access_token=access, refresh_token=refresh, user=_user_dict(user))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
@@ -86,8 +94,38 @@ async def request_password_reset(body: PasswordResetRequest):
 @router.post("/api-keys", response_model=APIKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(body: APIKeyCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     svc = AuthService(db)
-    raw_key, key_prefix, _ = await svc.generate_api_key(user.id, body.name)
-    return APIKeyCreated(id=user.id, name=body.name, raw_key=raw_key, key_prefix=key_prefix)
+    raw_key, key_prefix, key_id = await svc.generate_api_key(user.id, body.name)
+    return APIKeyCreated(id=key_id, name=body.name, raw_key=raw_key, key_prefix=key_prefix)
+
+
+@router.get("/api-keys", response_model=list[APIKeyResponse])
+async def list_api_keys(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    svc = AuthService(db)
+    return await svc.list_api_keys(user.id)
+
+
+@router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_key(key_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    svc = AuthService(db)
+    if not await svc.revoke_api_key(user.id, key_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+
+
+@router.get("/sessions", response_model=list[SessionResponse])
+async def list_sessions(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    svc = AuthService(db)
+    sessions = await svc.list_sessions(user.id)
+    return [SessionResponse(
+        id=s.id, user_agent=s.user_agent, ip_address=s.ip_address,
+        created_at=s.created_at, last_active_at=s.last_active_at,
+    ) for s in sessions]
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_session(session_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    svc = AuthService(db)
+    if not await svc.revoke_session(user.id, session_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
 
 def _user_dict(u: User) -> dict:

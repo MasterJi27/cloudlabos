@@ -15,12 +15,15 @@ import {
   LayoutDashboard, Workflow, Play, Shield, Database, Cpu,
   Terminal, Globe, Plug, BarChart3, FileText, Settings, Bell, Search,
   ChevronLeft, LogOut, CreditCard, Mail, Webhook, ChevronDown,
-  X, ChevronRight, Check, AlertTriangle, Zap,
+  X, ChevronRight, Check, AlertTriangle, Zap, Sun, Moon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
+import { useStore } from "@/store";
+import { useTheme } from "@/components/ThemeProvider";
 import { motion, AnimatePresence } from "framer-motion";
+import { formatDistanceToNow } from "date-fns";
 
 const navGroups = [
   {
@@ -62,14 +65,6 @@ const navGroups = [
 
 const allNavItems = navGroups.flatMap(g => g.items);
 
-const MOCK_NOTIFICATIONS = [
-  { id: "n1", type: "success" as const, title: "Deployment Successful", desc: "Workflow 'daily-scraper' deployed to production", time: "2m ago", read: false },
-  { id: "n2", type: "warning" as const, title: "Approval Required", desc: "Agent 'sentinel-v2' requesting elevated permissions", time: "15m ago", read: false },
-  { id: "n3", type: "error" as const, title: "Pipeline Failed", desc: "Run #3842 exited with code 1 at step 'validate'", time: "1h ago", read: false },
-  { id: "n4", type: "info" as const, title: "New Plugin Available", desc: "Datadog Metrics Exporter v2.1.0 released", time: "3h ago", read: true },
-  { id: "n5", type: "success" as const, title: "Agent Online", desc: "Vision agent 'hawk-eye' reconnected", time: "5h ago", read: true },
-];
-
 function getPageLabel(pathname: string): string {
   const item = allNavItems.find(i => i.path === pathname || (i.path !== "/" && pathname.startsWith(i.path)));
   return item?.label || "Dashboard";
@@ -79,7 +74,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -87,8 +82,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/";
   const router = useRouter();
   const { user, logout, workspaces, currentWorkspace } = useAuthStore();
+  const { theme, toggleTheme } = useTheme();
+  const { notifications: rawNotifications, unreadCount, fetchNotifications, fetchMarkNotificationRead, fetchMarkAllRead } = useStore();
+  const notifications = rawNotifications.filter((n: any) => !dismissedIds.has(n.id));
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -109,14 +113,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     useAuthStore.getState().setCurrentWorkspace(e.target.value);
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-
   const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    fetchMarkAllRead();
   };
 
   const dismissNotif = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    setDismissedIds(prev => new Set(prev).add(id));
+    fetchMarkNotificationRead(id);
   };
 
   const notifIcon = (type: string) => {
@@ -248,6 +251,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
             <div className="w-px h-4 bg-[rgba(255,255,255,0.06)] mx-1" />
 
+            {/* Theme toggle */}
+            <button
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+              className="p-1.5 rounded-md hover:bg-[var(--surface-1)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
             {/* Notification Bell */}
             <div ref={notifRef} className="relative">
               <button
@@ -279,13 +291,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     <div className="max-h-72 overflow-y-auto divide-y divide-[rgba(255,255,255,0.04)]">
                       {notifications.length === 0 ? (
                         <div className="px-4 py-8 text-center text-[12px] tracking-body text-[var(--text-tertiary)]">No notifications</div>
-                      ) : notifications.map(n => (
-                        <div key={n.id} className={`flex items-start gap-3 px-4 py-3 hover:bg-[var(--surface-1)] transition-colors group ${!n.read ? "bg-[var(--surface-1)]" : ""}`}>
+                      ) : notifications.map((n: any) => (
+                        <div key={n.id} className={`flex items-start gap-3 px-4 py-3 hover:bg-[var(--surface-1)] transition-colors group ${!n.is_read ? "bg-[var(--surface-1)]" : ""}`}>
                           <div className="mt-0.5 flex-shrink-0">{notifIcon(n.type)}</div>
                           <div className="flex-1 min-w-0">
-                            <p className={`text-[13px] font-medium tracking-body ${!n.read ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>{n.title}</p>
-                            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 leading-relaxed">{n.desc}</p>
-                            <p className="text-[11px] font-mono text-[var(--text-tertiary)] mt-1.5">{n.time}</p>
+                            <p className={`text-[13px] font-medium tracking-body ${!n.is_read ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>{n.title}</p>
+                            {n.message && <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 leading-relaxed">{n.message}</p>}
+                            <p className="text-[11px] font-mono text-[var(--text-tertiary)] mt-1.5">{formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}</p>
                           </div>
                           <button
                             onClick={(e) => { e.stopPropagation(); dismissNotif(n.id); }}

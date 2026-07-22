@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Enum as SAEnum
+from sqlalchemy import String, Boolean, DateTime, JSON, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 from app.core.roles import Role
@@ -18,7 +18,7 @@ class User(Base):
     mfa_secret: Mapped[str] = mapped_column(String(64), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     avatar_url: Mapped[str] = mapped_column(String(512), nullable=True)
-    api_key_hash: Mapped[str] = mapped_column(String(255), nullable=True)
+    notif_prefs: Mapped[dict] = mapped_column(JSON, default=dict)
     oauth_provider: Mapped[str] = mapped_column(String(50), nullable=True)
     oauth_id: Mapped[str] = mapped_column(String(255), nullable=True)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, Search, Play, GitBranch, Clock, CheckCircle2, X, Loader2,
-  ArrowLeft, Save, PlusCircle, Trash2, Edit2, AlertCircle
+  ArrowLeft, Save, PlusCircle, Trash2, Edit2, AlertCircle, Upload, Download, Copy, LayoutTemplate
 } from "lucide-react";
 import { useStore } from "@/store";
 import { api } from "@/lib/api";
@@ -85,6 +85,8 @@ export default function WorkflowsPage() {
   const [newWfDesc, setNewWfDesc] = useState("");
   const [creating, setCreating] = useState(false);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; description: string; category: string }>>([]);
 
   const [editingWorkflow, setEditingWorkflow] = useState<any | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -132,6 +134,55 @@ export default function WorkflowsPage() {
       toast("error", "Failed to create workflow");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleClone = async (id: string) => {
+    try {
+      await api.cloneWorkflow(id);
+      await fetchWorkflows();
+      toast("success", "Workflow duplicated");
+    } catch (e: any) { toast("error", e.message || "Failed to duplicate"); }
+  };
+
+  const handleExport = async (id: string, name: string) => {
+    try {
+      const data = await api.exportWorkflow(id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `workflow-${name.replace(/\s+/g, "-").toLowerCase()}.json`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) { toast("error", e.message || "Failed to export"); }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentWorkspace) return;
+    try {
+      const data = JSON.parse(await file.text());
+      await api.importWorkflow(currentWorkspace, data);
+      await fetchWorkflows();
+      toast("success", "Workflow imported");
+    } catch (err: any) {
+      toast("error", err.message?.includes("JSON") ? "Invalid workflow file" : (err.message || "Import failed"));
+    } finally { e.target.value = ""; }
+  };
+
+  const handleInstantiateTemplate = async (templateId: string) => {
+    if (!currentWorkspace) return;
+    try {
+      await api.createWorkflowFromTemplate(currentWorkspace, templateId);
+      await fetchWorkflows();
+      setTemplatesOpen(false);
+      toast("success", "Workflow created from template");
+    } catch (e: any) { toast("error", e.message || "Failed to create from template"); }
+  };
+
+  const handleOpenTemplates = async () => {
+    setTemplatesOpen(true);
+    if (templates.length === 0) {
+      try { setTemplates((await api.getWorkflowTemplates()).templates); } catch {}
     }
   };
 
@@ -333,12 +384,21 @@ export default function WorkflowsPage() {
           <h1 className="page-heading text-[var(--text-primary)] mb-2">Workflows</h1>
           <p className="text-[14px] text-[var(--text-secondary)]">Create, manage, and execute workflow automations.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> New Workflow
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="btn-secondary cursor-pointer flex items-center gap-2">
+            <Upload className="w-4 h-4" /> Import
+            <input type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} />
+          </label>
+          <button onClick={handleOpenTemplates} className="btn-secondary flex items-center gap-2">
+            <LayoutTemplate className="w-4 h-4" /> Templates
+          </button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> New Workflow
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-16">
@@ -469,6 +529,13 @@ export default function WorkflowsPage() {
                     >
                       Schedule
                     </button>
+                    <div className="flex-1" />
+                    <button onClick={(e) => { e.stopPropagation(); handleClone(workflow.id); }} title="Duplicate" className="btn-ghost h-8 px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); handleExport(workflow.id, workflow.name); }} title="Export" className="btn-ghost h-8 px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -536,6 +603,50 @@ export default function WorkflowsPage() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Template gallery */}
+      <AnimatePresence>
+        {templatesOpen && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-2xl bg-[var(--void)] border border-[rgba(255,255,255,0.1)] rounded-2xl p-8 shadow-[var(--elev-3)] max-h-[80vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-[20px] font-medium tracking-subheader text-[var(--text-primary)]">Workflow Templates</h2>
+                  <p className="text-[13px] text-[var(--text-secondary)] mt-1">Start from a prebuilt workflow.</p>
+                </div>
+                <button onClick={() => setTemplatesOpen(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              {templates.length === 0 ? (
+                <div className="py-12 text-center text-[13px] text-[var(--text-tertiary)]">Loading templates…</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {templates.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => handleInstantiateTemplate(t.id)}
+                      className="text-left p-4 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[var(--surface-1)] hover:bg-[var(--surface-2)] transition-colors group"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--surface-2)] text-[var(--text-secondary)] font-mono">{t.category}</span>
+                        <Plus className="w-3.5 h-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-primary)]" />
+                      </div>
+                      <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">{t.name}</p>
+                      <p className="text-[12px] text-[var(--text-tertiary)] leading-relaxed">{t.description}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </motion.div>
           </div>
         )}

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     default_model: str = "google/gemini-2.0-flash-lite-001"
+    github_token: str = ""
 
     model_config = {
         "env_prefix": "CLOUDLABOS_",

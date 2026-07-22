@@ -5,6 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.agent import Agent, AgentTool, AgentSession, AgentStatus
 from app.config import settings
+from app.core.agent_presets import preset_for
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token) — good enough for usage rollups
+    without pulling in a tokenizer dependency."""
+    return max(1, len(text or "") // 4)
 
 
 class AgentService:
@@ -15,27 +22,94 @@ class AgentService:
         result = await self.db.execute(
             select(Agent).where(Agent.workspace_id == workspace_id).order_by(Agent.created_at.desc())
         )
-        agents = result.scalars().all()
-        for a in agents:
-            a.tools_ = await self._get_tools(a.id) if hasattr(self, '_get_tools') else []
-        return agents
+        return result.scalars().all()
 
     async def get_agent(self, agent_id: str) -> Optional[Agent]:
         result = await self.db.execute(select(Agent).where(Agent.id == agent_id))
         return result.scalar_one_or_none()
 
     async def create_agent(self, workspace_id: str, created_by: str, data: dict) -> Agent:
+        agent_type = data.get("agent_type", "general")
+        # Fall back to the specialization's preset prompt when the caller didn't
+        # supply one, so a new agent behaves like its type out of the box.
+        system_prompt = data.get("system_prompt") or preset_for(agent_type)
         agent = Agent(
             name=data["name"],
             description=data.get("description"),
-            agent_type=data.get("agent_type", "general"),
+            agent_type=agent_type,
             model=data.get("model", "gpt-4o"),
-            system_prompt=data.get("system_prompt"),
+            system_prompt=system_prompt,
+            tags=data.get("tags", []),
             config=data.get("config", {}),
             workspace_id=workspace_id,
             created_by=created_by,
         )
         self.db.add(agent)
+        await self.db.commit()
+        await self.db.refresh(agent)
+        return agent
+
+    async def clone_agent(self, agent_id: str, created_by: str) -> Optional[Agent]:
+        src = await self.get_agent(agent_id)
+        if not src:
+            return None
+        clone = Agent(
+            name=f"{src.name} (copy)",
+            description=src.description,
+            agent_type=src.agent_type,
+            model=src.model,
+            system_prompt=src.system_prompt,
+            tags=list(src.tags or []),
+            config=dict(src.config or {}),
+            workspace_id=src.workspace_id,
+            created_by=created_by,
+        )
+        self.db.add(clone)
+        await self.db.flush()
+        # Copy tools too, so a clone is a true duplicate.
+        for t in await self._get_tools(src.id):
+            self.db.add(AgentTool(
+                agent_id=clone.id, name=t["name"], description=t.get("description"),
+                tool_type=t.get("tool_type", "builtin"),
+            ))
+        await self.db.commit()
+        await self.db.refresh(clone)
+        return clone
+
+    async def export_agent(self, agent_id: str) -> Optional[dict]:
+        agent = await self.get_agent(agent_id)
+        if not agent:
+            return None
+        tools = await self._get_tools(agent_id)
+        return {
+            "name": agent.name,
+            "description": agent.description,
+            "agent_type": agent.agent_type,
+            "model": agent.model,
+            "system_prompt": agent.system_prompt,
+            "tags": list(agent.tags or []),
+            "config": dict(agent.config or {}),
+            "tools": [{"name": t["name"], "description": t.get("description"),
+                       "tool_type": t.get("tool_type", "builtin")} for t in tools],
+            "_cloudlabos_export": "agent/v1",
+        }
+
+    async def import_agent(self, workspace_id: str, created_by: str, data: dict) -> Agent:
+        agent = await self.create_agent(workspace_id, created_by, {
+            "name": data.get("name", "Imported Agent"),
+            "description": data.get("description"),
+            "agent_type": data.get("agent_type", "general"),
+            "model": data.get("model", "gpt-4o"),
+            "system_prompt": data.get("system_prompt"),
+            "tags": data.get("tags", []),
+            "config": data.get("config", {}),
+        })
+        for t in (data.get("tools") or []):
+            if isinstance(t, dict) and t.get("name"):
+                self.db.add(AgentTool(
+                    agent_id=agent.id, name=t["name"], description=t.get("description"),
+                    tool_type=t.get("tool_type", "builtin"),
+                ))
         await self.db.commit()
         await self.db.refresh(agent)
         return agent
@@ -86,13 +160,21 @@ class AgentService:
         return True
 
     async def create_session(self, agent_id: str, user_id: str, thread_id: Optional[str] = None) -> AgentSession:
-        session = AgentSession(agent_id=agent_id, user_id=user_id, thread_id=thread_id)
+        session = AgentSession(agent_id=agent_id, user_id=user_id, thread_id=thread_id, meta={"messages": []})
         self.db.add(session)
         await self.db.commit()
         await self.db.refresh(session)
         return session
 
-    async def _call_llm(self, agent: Agent, input_text: str) -> str:
+    async def _get_session(self, session_id: str, agent_id: str) -> Optional[AgentSession]:
+        result = await self.db.execute(
+            select(AgentSession).where(AgentSession.id == session_id, AgentSession.agent_id == agent_id)
+        )
+        return result.scalar_one_or_none()
+
+    MAX_HISTORY_MESSAGES = 20  # cap context sent per turn so long chats don't blow past the model's token limit
+
+    async def _call_llm(self, agent: Agent, messages: list[dict]) -> str:
         api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "")
         if not api_key:
             return f"[{agent.name}] No API key configured. Configure OPENROUTER_API_KEY in .env"
@@ -111,10 +193,7 @@ class AgentService:
                     },
                     json={
                         "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": input_text},
-                        ],
+                        "messages": [{"role": "system", "content": system_prompt}] + messages,
                         "max_tokens": 1024,
                     },
                 )
@@ -130,13 +209,34 @@ class AgentService:
         agent = await self.get_agent(agent_id)
         if not agent:
             raise ValueError("Agent not found")
-        if not session_id:
+
+        session = await self._get_session(session_id, agent_id) if session_id else None
+        if not session:
             session = await self.create_session(agent_id, user_id)
-            session_id = session.id
+
+        history = list((session.meta or {}).get("messages", []))
+        history.append({"role": "user", "content": input_text})
+
         agent.tasks_total += 1
         await self.db.commit()
-        output = await self._call_llm(agent, input_text)
-        return output, session_id, None
+
+        output = await self._call_llm(agent, history[-self.MAX_HISTORY_MESSAGES:])
+
+        history.append({"role": "assistant", "content": output})
+        session.meta = {**(session.meta or {}), "messages": history[-self.MAX_HISTORY_MESSAGES:]}
+        # Track approximate token usage for cost/usage rollups.
+        agent.tokens_used = (agent.tokens_used or 0) + _estimate_tokens(input_text) + _estimate_tokens(output)
+        await self.db.commit()
+
+        return output, session.id, None
+
+    async def clear_session(self, session_id: str, agent_id: str) -> bool:
+        session = await self._get_session(session_id, agent_id)
+        if not session:
+            return False
+        session.meta = {**(session.meta or {}), "messages": []}
+        await self.db.commit()
+        return True
 
     async def _get_tools(self, agent_id: str) -> list[dict]:
         result = await self.db.execute(

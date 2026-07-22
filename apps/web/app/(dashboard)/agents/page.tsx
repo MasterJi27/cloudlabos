@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Brain, Cpu, CheckCircle2, XCircle, Pause, GitBranch, Terminal, Database,
-  Plus, X, Loader2, Trash2, Search, Filter, Play
+  Plus, X, Loader2, Trash2, Search, Filter, Play, Copy, Download, Upload, Star
 } from "lucide-react";
 import { useStore, Agent } from "@/store";
 import { useAgentsStore } from "@/lib/store";
@@ -68,6 +68,47 @@ export default function AgentsGrid() {
 
   useEffect(() => { setPage(1); }, [searchQuery]);
 
+  const handleClone = async (id: string) => {
+    try {
+      await api.cloneAgent(id);
+      if (currentWorkspace) await fetchAgents();
+      toast("success", "Agent duplicated");
+    } catch (e: any) { toast("error", e.message || "Failed to duplicate"); }
+  };
+
+  const handleExport = async (id: string, name: string) => {
+    try {
+      const data = await api.exportAgent(id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `agent-${name.replace(/\s+/g, "-").toLowerCase()}.json`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) { toast("error", e.message || "Failed to export"); }
+  };
+
+  const handleStar = async (id: string, current: boolean) => {
+    try {
+      await api.updateAgent(id, { is_starred: !current });
+      if (currentWorkspace) await fetchAgents();
+    } catch (e: any) { toast("error", e.message || "Failed to update"); }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentWorkspace) return;
+    try {
+      const data = JSON.parse(await file.text());
+      await api.importAgent(currentWorkspace, data);
+      await fetchAgents();
+      toast("success", "Agent imported");
+    } catch (err: any) {
+      toast("error", err.message?.includes("JSON") ? "Invalid agent file" : (err.message || "Import failed"));
+    } finally {
+      e.target.value = "";
+    }
+  };
+
   const runBulkAction = async (action: "pause" | "restart" | "delete") => {
     const ids = Array.from(selectedIds);
     setBulkWorking(true);
@@ -105,6 +146,11 @@ export default function AgentsGrid() {
           <p className="text-[14px] text-[var(--text-secondary)]">Manage your autonomous worker nodes and specialized AI agents.</p>
         </div>
         <div className="flex items-center gap-3">
+          <label className="btn-secondary cursor-pointer">
+            <Upload className="w-4 h-4 text-[var(--text-tertiary)]" />
+            Import
+            <input type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} />
+          </label>
           <button className="btn-secondary" onClick={() => router.push('/agents/provision')}>
             <GitBranch className="w-4 h-4 text-[var(--text-tertiary)]" />
             Provision Node
@@ -226,31 +272,31 @@ export default function AgentsGrid() {
               </div>
 
               {/* Actions */}
-              <div className="w-1/4 flex justify-end items-center gap-2">
+              <div className="w-1/4 flex justify-end items-center gap-1.5">
                 <button
-                  onClick={() => router.push(`/agents/${agent.id}`)}
-                  title="Open chat"
-                  className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={() => handleStar(agent.id, (agent as any).is_starred)}
+                  title={(agent as any).is_starred ? "Unstar" : "Star"}
+                  className={`btn-ghost px-2 transition-opacity ${(agent as any).is_starred ? "text-[var(--warning)] opacity-100" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100"}`}
                 >
-                  <Terminal className="w-4 h-4" />
+                  <Star className="w-4 h-4" fill={(agent as any).is_starred ? "currentColor" : "none"} />
                 </button>
                 <button
-                  onClick={async () => {
-                    try {
-                      await api.updateAgent(agent.id, { status: agent.status === "active" ? "idle" : "active" });
-                      if (currentWorkspace) await fetchAgents();
-                    } catch (e: any) {
-                      toast("error", e.message || "Failed to update agent");
-                    }
-                  }}
-                  title={agent.status === "active" ? "Pause agent" : "Activate agent"}
+                  onClick={() => handleClone(agent.id)}
+                  title="Duplicate agent"
                   className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <Pause className="w-4 h-4" />
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleExport(agent.id, agent.name)}
+                  title="Export agent"
+                  className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Download className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => router.push(`/agents/${agent.id}`)}
-                  className="btn-secondary ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="btn-secondary ml-1 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   View Details
                 </button>

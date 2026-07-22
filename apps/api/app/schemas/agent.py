@@ -10,6 +10,7 @@ class AgentCreate(BaseModel):
     agent_type: str = "general"
     model: str = "gpt-4o"
     system_prompt: Optional[str] = None
+    tags: list[str] = []
     config: dict[str, Any] = {}
 
 
@@ -19,6 +20,8 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     model: Optional[str] = None
     system_prompt: Optional[str] = None
+    tags: Optional[list[str]] = None
+    is_starred: Optional[bool] = None
     config: Optional[dict[str, Any]] = None
 
 
@@ -33,12 +36,27 @@ class AgentResponse(BaseModel):
     memory_usage: str
     uptime: str
     tasks_total: int
+    tokens_used: int = 0
+    tags: list[str] = []
+    is_starred: bool = False
     tools: list[dict[str, Any]] = []
     workspace_id: str
     created_by: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AgentImport(BaseModel):
+    """Shape for importing a previously-exported agent."""
+    name: str
+    description: Optional[str] = None
+    agent_type: str = "general"
+    model: str = "gpt-4o"
+    system_prompt: Optional[str] = None
+    tags: list[str] = []
+    config: dict[str, Any] = {}
+    tools: list[dict[str, Any]] = []
 
 
 class ToolCreate(BaseModel):

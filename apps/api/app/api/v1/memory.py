@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from typing import Optional
 from app.schemas.memory import (
     CollectionCreate, CollectionUpdate, CollectionResponse,
-    MemoryCreate, MemoryResponse, MemorySearch,
+    MemoryCreate, MemoryResponse, MemorySearch, MemoryBulkCreate,
 )
 from app.services.memory import MemoryService
 from app.core.security import get_current_user, require_permission
@@ -111,18 +112,34 @@ async def list_items(
     collection_id: str,
     limit: int = Query(50),
     offset: int = Query(0),
+    tag: Optional[str] = Query(None),
     user: User = Depends(require_permission("memory:read")),
     db: AsyncSession = Depends(get_db),
 ):
     svc = MemoryService(db)
     await _get_collection_or_404(svc, collection_id, user, db)
     items = await svc.list_items(collection_id, limit, offset)
+    if tag:
+        items = [i for i in items if tag in ((i.response_meta or {}).get("tags") or [])]
     return [MemoryResponse(
         id=i.id, collection_id=i.collection_id,
         content=i.content, metadata=i.response_meta,
         token_count=i.token_count, source=i.source,
         created_by=i.created_by, created_at=i.created_at,
     ) for i in items]
+
+
+@router.post("/collections/{collection_id}/items/bulk")
+async def bulk_import_items(
+    collection_id: str,
+    body: MemoryBulkCreate,
+    user: User = Depends(require_permission("memory:*")),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = MemoryService(db)
+    await _get_collection_or_404(svc, collection_id, user, db)
+    count = await svc.bulk_create_items(collection_id, [i.model_dump() for i in body.items], user.id)
+    return {"imported": count}
 
 
 @router.post("/collections/{collection_id}/items", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)

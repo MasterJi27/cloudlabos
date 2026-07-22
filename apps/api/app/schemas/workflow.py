@@ -7,6 +7,7 @@ class WorkflowCreate(BaseModel):
     name: str
     description: Optional[str] = None
     definition: dict[str, Any] = {}
+    tags: list[str] = []
 
 
 class WorkflowUpdate(BaseModel):
@@ -14,6 +15,15 @@ class WorkflowUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     definition: Optional[dict[str, Any]] = None
+    tags: Optional[list[str]] = None
+    is_starred: Optional[bool] = None
+
+
+class WorkflowImport(BaseModel):
+    name: str
+    description: Optional[str] = None
+    definition: dict[str, Any] = {}
+    tags: list[str] = []
 
 
 class WorkflowResponse(BaseModel):
@@ -24,6 +34,8 @@ class WorkflowResponse(BaseModel):
     version: str
     steps: int
     last_run: Optional[str] = None
+    tags: list[str] = []
+    is_starred: bool = False
     workspace_id: str
     created_by: str
     created_at: datetime

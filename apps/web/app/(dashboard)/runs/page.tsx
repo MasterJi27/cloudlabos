@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Play, Pause, ChevronRight, Clock, CheckCircle2, XCircle, Brain, Workflow, Timer, X, Loader2, Filter,
+  Play, Pause, ChevronRight, Clock, CheckCircle2, XCircle, Brain, Workflow, Timer, X, Loader2, Filter, RefreshCw, Download,
 } from "lucide-react";
 import { useStore } from "@/store";
+import { api } from "@/lib/api";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
 import { Tabs } from "@/components/Tabs";
 import { useToast } from "@/components/ui/Toast";
@@ -97,6 +98,39 @@ export default function RunsPage() {
     }
   };
 
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const handleRetry = async (runId: string) => {
+    setRetrying(runId);
+    try {
+      await api.retryRun(runId);
+      await fetchRuns();
+      toast("success", "Run restarted");
+    } catch (e: any) {
+      toast("error", e.message || "Failed to retry run");
+    } finally {
+      setRetrying(null);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!currentWorkspace) return;
+    // The CSV endpoint needs the auth header, so fetch as a blob rather than a bare link.
+    const token = (useStore.getState() as any).token;
+    try {
+      const resp = await fetch(api.runsCsvUrl(currentWorkspace), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "runs.csv"; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast("error", "Failed to export runs");
+    }
+  };
+
   const handleCancelRun = async (runId: string) => {
     setCancellingRun(runId);
     try {
@@ -120,12 +154,17 @@ export default function RunsPage() {
           <h1 className="page-heading text-[var(--text-primary)] mb-2">Workflow Runs</h1>
           <p className="text-[14px] text-[var(--text-secondary)]">Monitor and manage workflow executions.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Play className="w-4 h-4" /> New Run
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={handleExportCsv} className="btn-secondary flex items-center gap-2" disabled={allRuns.length === 0}>
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Play className="w-4 h-4" /> New Run
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-16">
@@ -222,6 +261,18 @@ export default function RunsPage() {
                       title="Cancel run"
                     >
                       {cancellingRun === run.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+                  {(run.status === "failed" || run.status === "cancelled") && (
+                    <button
+                      type="button"
+                      onClick={(event) => { event.stopPropagation(); handleRetry(run.id); }}
+                      disabled={retrying === run.id}
+                      className="btn-ghost h-8 px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                      aria-label={`Retry ${run.workflow_name}`}
+                      title="Retry run"
+                    >
+                      {retrying === run.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                     </button>
                   )}
                   <ChevronRight className={`w-4 h-4 text-[var(--text-tertiary)] transition-transform ${selectedRun === run.id ? "rotate-90" : ""}`} />

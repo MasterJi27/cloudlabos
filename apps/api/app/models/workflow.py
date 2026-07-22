@@ -30,6 +30,8 @@ class Workflow(Base):
     version: Mapped[str] = mapped_column(String(20), default="1.0.0")
     steps: Mapped[int] = mapped_column(Integer, default=0)
     definition: Mapped[dict] = mapped_column(JSON, default=dict)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
     workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

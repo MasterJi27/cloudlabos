@@ -82,6 +82,22 @@ class ApiClient {
     return this.request<{ id: string; name: string; raw_key: string; key_prefix: string }>("/api/v1/auth/api-keys", { method: "POST", body: JSON.stringify({ name }) });
   }
 
+  async listApiKeys() {
+    return this.request<Array<{ id: string; name: string; key_prefix: string; created_at: string; last_used_at?: string | null }>>("/api/v1/auth/api-keys");
+  }
+
+  async revokeApiKey(keyId: string) {
+    return this.request<void>(`/api/v1/auth/api-keys/${keyId}`, { method: "DELETE" });
+  }
+
+  async listSessions() {
+    return this.request<Array<{ id: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_active_at?: string | null }>>("/api/v1/auth/sessions");
+  }
+
+  async revokeSession(sessionId: string) {
+    return this.request<void>(`/api/v1/auth/sessions/${sessionId}`, { method: "DELETE" });
+  }
+
   async requestPasswordReset(email: string) {
     return this.request<{ status: string }>("/api/v1/auth/password-reset", { method: "POST", body: JSON.stringify({ email }) });
   }
@@ -340,6 +356,85 @@ class ApiClient {
   // Status
   async getStatus() {
     return this.request<{ status: string; version: string }>("/health");
+  }
+
+  // --- Agents: presets, clone, import/export, sessions ---
+  async getAgentTypes() {
+    return this.request<{ types: string[] }>("/api/v1/agents/types");
+  }
+  async cloneAgent(agentId: string) {
+    return this.request<Record<string, unknown>>(`/api/v1/agents/${agentId}/clone`, { method: "POST" });
+  }
+  async exportAgent(agentId: string) {
+    return this.request<Record<string, unknown>>(`/api/v1/agents/${agentId}/export`);
+  }
+  async importAgent(workspaceId: string, data: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>(`/api/v1/agents/import?workspace_id=${workspaceId}`, { method: "POST", body: JSON.stringify(data) });
+  }
+  async clearAgentSession(agentId: string, sessionId: string) {
+    return this.request<{ status: string }>(`/api/v1/agents/${agentId}/sessions/${sessionId}/clear`, { method: "POST" });
+  }
+
+  // --- Workflows: templates, clone, import/export, retry ---
+  async getWorkflowTemplates() {
+    return this.request<{ templates: Array<{ id: string; name: string; description: string; category: string }> }>("/api/v1/workflows/templates");
+  }
+  async createWorkflowFromTemplate(workspaceId: string, templateId: string) {
+    return this.request<Record<string, unknown>>(`/api/v1/workflows/from-template/${templateId}?workspace_id=${workspaceId}`, { method: "POST" });
+  }
+  async cloneWorkflow(workflowId: string) {
+    return this.request<Record<string, unknown>>(`/api/v1/workflows/${workflowId}/clone`, { method: "POST" });
+  }
+  async exportWorkflow(workflowId: string) {
+    return this.request<Record<string, unknown>>(`/api/v1/workflows/${workflowId}/export`);
+  }
+  async importWorkflow(workspaceId: string, data: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>(`/api/v1/workflows/import?workspace_id=${workspaceId}`, { method: "POST", body: JSON.stringify(data) });
+  }
+  async retryRun(runId: string) {
+    return this.request<{ id: string; status: string }>(`/api/v1/workflows/runs/${runId}/retry`, { method: "POST" });
+  }
+
+  // --- Search / dashboard / audit ---
+  async search(workspaceId: string, q: string) {
+    return this.request<{ query: string; count: number; results: Array<{ type: string; id: string; title: string; subtitle: string; url: string }> }>(`/api/v1/search/?workspace_id=${workspaceId}&q=${encodeURIComponent(q)}`);
+  }
+  async getDashboardStats(workspaceId: string) {
+    return this.request<Record<string, any>>(`/api/v1/dashboard/stats?workspace_id=${workspaceId}`);
+  }
+  async getActivity(workspaceId: string, limit = 20) {
+    return this.request<{ activity: Array<Record<string, any>> }>(`/api/v1/dashboard/activity?workspace_id=${workspaceId}&limit=${limit}`);
+  }
+  async getSystemStatus(workspaceId: string) {
+    return this.request<{ overall: string; components: Array<{ name: string; status: string }> }>(`/api/v1/dashboard/status?workspace_id=${workspaceId}`);
+  }
+  async getAuditLog(workspaceId: string, action?: string) {
+    const q = action ? `&action=${encodeURIComponent(action)}` : "";
+    return this.request<{ entries: Array<Record<string, any>> }>(`/api/v1/audit/?workspace_id=${workspaceId}${q}`);
+  }
+  runsCsvUrl(workspaceId: string) {
+    return `${API_BASE}/api/v1/dashboard/runs.csv?workspace_id=${workspaceId}`;
+  }
+
+  // --- Notification preferences ---
+  async getNotificationPreferences() {
+    return this.request<Record<string, boolean>>("/api/v1/notifications/preferences");
+  }
+  async updateNotificationPreferences(prefs: Record<string, boolean>) {
+    return this.request<Record<string, boolean>>("/api/v1/notifications/preferences", { method: "PUT", body: JSON.stringify({ prefs }) });
+  }
+
+  // --- Memory bulk import ---
+  async bulkCreateMemory(collectionId: string, items: Array<Record<string, unknown>>) {
+    return this.request<{ imported: number }>(`/api/v1/memory/collections/${collectionId}/items/bulk`, { method: "POST", body: JSON.stringify({ items }) });
+  }
+
+  // --- Research tools ---
+  async researchGithub(repo: string) {
+    return this.request<{ repo: string; content: string; commands: string[]; length: number }>("/api/v1/research/github", { method: "POST", body: JSON.stringify({ repo }) });
+  }
+  async researchUrl(url: string) {
+    return this.request<{ url: string; status: number; title: string | null; text: string; length: number }>("/api/v1/research/url", { method: "POST", body: JSON.stringify({ url }) });
   }
 }
 

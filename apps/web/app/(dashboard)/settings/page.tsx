@@ -6,9 +6,11 @@ import { Save, User, Shield, Bell, Palette, Database, Key, Plus, Trash2, Monitor
 import { useStore } from "@/store";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
+import { useTheme } from "@/components/ThemeProvider";
 
 export default function SettingsPage() {
   const { toast } = useToast();
+  const { theme, setTheme } = useTheme();
   const { user, apiKeys, fetchApiKeys, fetchCreateApiKey, fetchRevokeApiKey, sessions, fetchSessions, fetchRevokeSession } = useStore();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -47,21 +49,24 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchApiKeys();
     fetchSessions();
-    
+    api.getNotificationPreferences()
+      .then((prefs) => setNotifications((prev) => ({ ...prev, ...prefs })))
+      .catch(() => {});
+
     if (user) {
       setProfileName(user.name || "");
       setProfileEmail(user.email || "");
       setProfileRole(user.role || "");
     }
 
-    const isDark = document.documentElement.classList.contains("dark");
-    setActiveTheme(isDark ? "dark" : "light");
-  }, [user, fetchApiKeys, fetchSessions]);
+    setActiveTheme(theme);
+  }, [user, fetchApiKeys, fetchSessions, theme]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await api.updateSettings({ theme: activeTheme, language, notifications, system });
+      await api.updateNotificationPreferences(notifications as any).catch(() => {});
 
       if (user && (profileName !== user.name || profileEmail !== user.email)) {
         const updated = await api.updateProfile({ name: profileName, email: profileEmail });
@@ -80,11 +85,7 @@ export default function SettingsPage() {
 
   const handleThemeChange = (newTheme: string) => {
     setActiveTheme(newTheme);
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    setTheme(newTheme as "dark" | "light");
   };
 
   const createApiKey = async () => {

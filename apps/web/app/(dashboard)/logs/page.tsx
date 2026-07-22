@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Terminal, Search, Download, Trash2, PauseCircle, PlayCircle, 
-  Info, AlertTriangle, Bug, AlertCircle
+import {
+  Terminal, Search, Download, Trash2, PauseCircle, PlayCircle,
+  Info, AlertTriangle, Bug, AlertCircle, ShieldCheck, Activity
 } from "lucide-react";
+import { api } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 
 type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
 
@@ -61,11 +63,24 @@ export default function LogsViewer() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isPaused, setIsPaused] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  
+  const [view, setView] = useState<"stream" | "audit">("audit");
+  const [audit, setAudit] = useState<Array<Record<string, any>>>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const currentWorkspace = useAuthStore((s) => s.currentWorkspace);
+
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   useEffect(() => {
-    if (isPaused) return;
+    if (view !== "audit" || !currentWorkspace) return;
+    setAuditLoading(true);
+    api.getAuditLog(currentWorkspace)
+      .then((r) => setAudit(r.entries || []))
+      .catch(() => setAudit([]))
+      .finally(() => setAuditLoading(false));
+  }, [view, currentWorkspace]);
+
+  useEffect(() => {
+    if (view !== "stream" || isPaused) return;
     
     const interval = setInterval(() => {
       const level = LOG_LEVELS[Math.floor(Math.random() * LOG_LEVELS.length)];
@@ -85,8 +100,8 @@ export default function LogsViewer() {
     }, Math.random() * 2000 + 1000);
     
     return () => clearInterval(interval);
-  }, [isPaused]);
-  
+  }, [isPaused, view]);
+
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -126,50 +141,79 @@ export default function LogsViewer() {
         <div>
           <h1 className="page-heading text-[var(--text-primary)] mb-2 flex items-center gap-3">
             <Terminal className="w-6 h-6 text-[var(--text-secondary)]" />
-            Live Logs
+            Logs & Audit
           </h1>
-          <p className="text-[14px] text-[var(--text-secondary)]">Real-time system event stream.</p>
+          <p className="text-[14px] text-[var(--text-secondary)]">{view === "audit" ? "Recorded actions across this workspace." : "Simulated real-time system event stream."}</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setIsPaused(!isPaused)} 
-            className={`btn-secondary h-8 px-4 ${isPaused ? "bg-[var(--warning)]/10 text-[var(--warning)] hover:bg-[var(--warning)]/20" : ""}`}
-          >
-            {isPaused ? <PlayCircle className="w-3.5 h-3.5 mr-1.5" /> : <PauseCircle className="w-3.5 h-3.5 mr-1.5" />}
-            {isPaused ? "Resume" : "Pause"}
-          </button>
-          
-          <button 
-            onClick={handleClearLogs}
-            className="btn-secondary h-8 px-3"
-            title="Clear Logs"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          
-          <button 
-            onClick={handleExportLogs}
-            className="btn-secondary h-8 px-3"
-            title="Export Logs"
-          >
-            <Download className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1 bg-[var(--surface-1)] rounded-lg p-1 shadow-[var(--edge-subtle)]">
+            <button onClick={() => setView("audit")} className={`px-3 py-1 rounded-md text-[12px] flex items-center gap-1.5 transition-colors ${view === "audit" ? "bg-[var(--surface-3)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+              <ShieldCheck className="w-3.5 h-3.5" /> Audit Trail
+            </button>
+            <button onClick={() => setView("stream")} className={`px-3 py-1 rounded-md text-[12px] flex items-center gap-1.5 transition-colors ${view === "stream" ? "bg-[var(--surface-3)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+              <Activity className="w-3.5 h-3.5" /> Live Stream
+            </button>
+          </div>
+          {view === "stream" && (
+            <>
+              <button
+                onClick={() => setIsPaused(!isPaused)}
+                className={`btn-secondary h-8 px-4 ${isPaused ? "bg-[var(--warning)]/10 text-[var(--warning)] hover:bg-[var(--warning)]/20" : ""}`}
+              >
+                {isPaused ? <PlayCircle className="w-3.5 h-3.5 mr-1.5" /> : <PauseCircle className="w-3.5 h-3.5 mr-1.5" />}
+                {isPaused ? "Resume" : "Pause"}
+              </button>
+              <button onClick={handleClearLogs} className="btn-secondary h-8 px-3" title="Clear Logs">
+                <Trash2 className="w-4 h-4" />
+              </button>
+              <button onClick={handleExportLogs} className="btn-secondary h-8 px-3" title="Export Logs">
+                <Download className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
       </header>
 
+      {view === "audit" && (
+        <div className="flex-1 overflow-y-auto rounded-lg bg-[var(--surface-1)] shadow-[var(--edge-subtle)]">
+          {auditLoading ? (
+            <div className="text-center py-24 text-[var(--text-tertiary)]">Loading audit trail…</div>
+          ) : audit.length === 0 ? (
+            <div className="text-center py-24 text-[var(--text-tertiary)]">
+              <ShieldCheck className="w-8 h-8 mx-auto mb-4 opacity-40" />
+              <p className="text-[13px]">No recorded actions yet. Create or run something to populate the audit trail.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[rgba(255,255,255,0.04)]">
+              {audit.map((e) => (
+                <div key={e.id} className="flex items-center gap-4 px-5 py-3 hover:bg-[var(--surface-2)] transition-colors">
+                  <span className="font-mono text-[13px] text-[var(--text-primary)] w-56 shrink-0">{e.action}</span>
+                  <span className="text-[12px] text-[var(--text-secondary)] flex-1 truncate">
+                    {e.resource_type}{e.resource_id ? ` · ${String(e.resource_id).slice(0, 8)}` : ""}
+                    {e.details?.name ? ` · ${e.details.name}` : ""}
+                  </span>
+                  <span className="text-[11px] font-mono text-[var(--text-tertiary)] shrink-0">{new Date(e.created_at).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "stream" && (<>
       <div className="flex flex-col sm:flex-row items-center gap-4 bg-[var(--surface-1)] p-4 rounded-t-lg shadow-[var(--edge-subtle)] flex-shrink-0">
         <div className="relative flex-1 w-full max-w-md">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <input
-            type="text" 
-            placeholder="Search logs by message or source..." 
+            type="text"
+            placeholder="Search logs by message or source..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input pl-9 font-mono text-[12px] h-8"
           />
         </div>
-        
+
         <div className="flex items-center gap-1.5">
           {["ALL", ...LOG_LEVELS].map((lvl) => (
             <button
@@ -244,6 +288,7 @@ export default function LogsViewer() {
           </button>
         )}
       </div>
+      </>)}
     </div>
   );
 }

@@ -30,6 +30,7 @@ export default function ProvisionAgentPage() {
   const [agentType, setAgentType] = useState("general");
   const [model, setModel] = useState("gpt-4o");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [tagsInput, setTagsInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -45,6 +46,7 @@ export default function ProvisionAgentPage() {
         agent_type: agentType,
         model,
         system_prompt: systemPrompt.trim() || undefined,
+        tags: tagsInput.split(",").map((t) => t.trim()).filter(Boolean),
       } as any);
       router.push(`/agents/${created.id}`);
     } catch (e: any) {
@@ -90,6 +92,10 @@ export default function ProvisionAgentPage() {
           <div>
             <label className="block text-[12px] font-medium tracking-body text-[var(--text-secondary)] mb-2">Description</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="What does this agent do?" className="input min-h-[80px] py-3 resize-none" />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium tracking-body text-[var(--text-secondary)] mb-2">Tags <span className="text-[var(--text-tertiary)]">(comma-separated)</span></label>
+            <input type="text" value={tagsInput} onChange={e => setTagsInput(e.target.value)} placeholder="e.g. prod, customer-facing" className="input" />
           </div>
         </div>
 

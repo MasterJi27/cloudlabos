@@ -186,14 +186,35 @@ export const useLegacyStore = create<StoreState>()((set) => ({
   fetchMemory: async () => {},
   fetchMemorySearch: async () => {},
   fetchDeleteMemory: async () => {},
-  fetchApiKeys: async () => {},
+  fetchApiKeys: async () => {
+    try {
+      const data = await api.listApiKeys();
+      useLegacyStore.setState({ apiKeys: Array.isArray(data) ? data : [] });
+    } catch (e) { console.error("fetchApiKeys", e); }
+  },
   fetchCreateApiKey: async (name) => {
     const res = await api.createApiKey(name);
+    await useLegacyStore.getState().fetchApiKeys();
     return res.raw_key;
   },
-  fetchRevokeApiKey: async () => {},
-  fetchSessions: async () => {},
-  fetchRevokeSession: async () => {},
+  fetchRevokeApiKey: async (id) => {
+    try {
+      await api.revokeApiKey(id);
+      useLegacyStore.setState((s) => ({ apiKeys: s.apiKeys.filter((k: any) => k.id !== id) }));
+    } catch (e) { console.error("fetchRevokeApiKey", e); }
+  },
+  fetchSessions: async () => {
+    try {
+      const data = await api.listSessions();
+      useLegacyStore.setState({ sessions: Array.isArray(data) ? data : [] });
+    } catch (e) { console.error("fetchSessions", e); }
+  },
+  fetchRevokeSession: async (id) => {
+    try {
+      await api.revokeSession(id);
+      useLegacyStore.setState((s) => ({ sessions: s.sessions.filter((sess: any) => sess.id !== id) }));
+    } catch (e) { console.error("fetchRevokeSession", e); }
+  },
   fetchSubscription: async () => {
     try {
       const data = await api.getSubscription();
@@ -212,9 +233,33 @@ export const useLegacyStore = create<StoreState>()((set) => ({
       useLegacyStore.setState({ subscription: data as any });
     } catch (e) { console.error("fetchUpdateSubscription", e); }
   },
-  fetchNotifications: async () => {},
-  fetchMarkNotificationRead: async () => {},
-  fetchMarkAllRead: async () => {},
+  fetchNotifications: async () => {
+    try {
+      const data = await api.listNotifications();
+      useLegacyStore.setState({
+        notifications: Array.isArray(data.notifications) ? data.notifications : [],
+        unreadCount: data.unread_count || 0,
+      });
+    } catch (e) { console.error("fetchNotifications", e); }
+  },
+  fetchMarkNotificationRead: async (id) => {
+    try {
+      await api.markNotificationRead(id);
+      useLegacyStore.setState((s) => ({
+        notifications: s.notifications.map((n: any) => n.id === id ? { ...n, is_read: true } : n),
+        unreadCount: Math.max(0, s.unreadCount - 1),
+      }));
+    } catch (e) { console.error("fetchMarkNotificationRead", e); }
+  },
+  fetchMarkAllRead: async () => {
+    try {
+      await api.markAllNotificationsRead();
+      useLegacyStore.setState((s) => ({
+        notifications: s.notifications.map((n: any) => ({ ...n, is_read: true })),
+        unreadCount: 0,
+      }));
+    } catch (e) { console.error("fetchMarkAllRead", e); }
+  },
   fetchWebhooks: async () => {
     const ws = useAuthStore.getState().currentWorkspace;
     if (!ws) return;

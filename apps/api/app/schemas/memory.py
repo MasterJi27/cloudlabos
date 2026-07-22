@@ -53,3 +53,7 @@ class MemorySearch(BaseModel):
     top_k: int = 10
     score_threshold: float = 0.0
     filter: dict[str, Any] = {}
+
+
+class MemoryBulkCreate(BaseModel):
+    items: list[MemoryCreate]

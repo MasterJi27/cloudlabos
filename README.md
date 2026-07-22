@@ -1,115 +1,92 @@
-# CloudLabOS Enterprise
+# CloudLabOS
 
-> Enterprise-grade autonomous AI workflow operating system
-
-## Quick Start
-
-For a production deployment, read [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md) first. The default schema no longer creates an administrator account or sample workflows; register the first user through the application, then create the first workspace.
-
-```bash
-# 1. Copy environment file
-cp .env.example .env
-
-# 2. Start the full stack
-docker compose up -d
-
-# 3. Access the dashboard
-# Frontend: http://localhost:3000
-# API Gateway: http://localhost:8000
-# Grafana: http://localhost:3001
-# Prometheus: http://localhost:9090
-# Qdrant: http://localhost:6333
-```
+> An AI workflow operating system — agents, workflows, memory, and approvals in one dashboard.
 
 ## Architecture
 
-### Backend Services
-| Service | Port | Description |
-|---------|------|-------------|
-| API Gateway | 8000 | REST API, Auth, WebSocket hub |
-| Agent Service | 8001 | 8 AI agents orchestration |
-| Workflow Engine | 8002 | DAG execution |
-| Memory Service | 8003 | Vector + structured memory |
-| Browser Service | 8004 | Playwright browser pool |
-| Research Service | 8005 | External source adapters |
+CloudLabOS runs as **two apps**:
 
-### AI Agents
-1. **Orchestrator** - Central workflow coordinator
-2. **Vision** - Screenshot and UI analysis
-3. **Security** - Risk evaluation and approval gating
-4. **Planner** - Execution DAG generation
-5. **Execution** - Browser and terminal automation
-6. **Validation** - Step completion verification
-7. **Memory** - Vector storage operations
-8. **Research** - External knowledge extraction
+| App | Stack | Port | Role |
+|-----|-------|------|------|
+| `apps/api` | FastAPI + SQLAlchemy (SQLite dev / Postgres prod) | 8000 | Consolidated backend: auth, workspaces, agents, workflows, memory, approvals, webhooks, billing, notifications, search, dashboard, audit, research |
+| `apps/web` | Next.js 16 + React 19 + Tailwind + Zustand | 3000 | Dashboard UI |
 
-### Technology Stack
-- **Frontend**: Next.js 15, React, TailwindCSS, Framer Motion, Zustand
-- **Backend**: FastAPI, Python asyncio
-- **AI**: OpenRouter (DeepSeek R1, Qwen Coder, Claude)
-- **Database**: PostgreSQL, Redis, Qdrant
-- **Browser**: Playwright
-- **Monitoring**: Prometheus, Grafana, OpenTelemetry
+> The original multi-service design (`agent-service`, `workflow-engine`,
+> `memory-service`, `browser-service`, `research-service`, `api-gateway`) has been
+> archived under [`legacy/`](legacy/README.md). It is not used by the running app.
+> Its best pieces (the specialized agent prompts and the research adapters) were
+> salvaged into `apps/api`.
 
-## Project Structure
+## Quick start (local, no Docker)
+
+```bash
+# 1. Backend
+cd apps/api
+python -m venv .venv && . .venv/Scripts/activate   # or source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+
+# 2. Frontend (new terminal)
+cd apps/web
+npm install
+npm run dev
+
+# 3. Open http://localhost:3000 and register an account
+```
+
+The dev backend uses SQLite (`apps/api/cloudlabos.db`, auto-created) and seeds a
+demo admin (`admin@cloudlabos.ai` / `admin123`) plus sample data. Registering a
+new account auto-provisions a personal workspace.
+
+### AI configuration
+
+Agent chat and agent-powered workflow steps call an LLM via OpenRouter. Set the
+key in `apps/api/.env` (note the `CLOUDLABOS_` prefix that `pydantic-settings`
+requires):
+
+```env
+CLOUDLABOS_OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+Without a key, agents return a clear "no API key configured" message instead of
+failing.
+
+## Feature highlights
+
+- **Agents** — specialized presets (security, analyst, coding, research, …),
+  chat with conversation memory, clone / export / import, tags, starring, token
+  usage tracking, per-agent tools.
+- **Workflows** — a prebuilt template gallery, real step execution (agent steps
+  invoke the LLM), clone / export / import, scheduling with cron, run history,
+  retry, and cancel.
+- **Memory** — collections, items, tags, semantic search, bulk import.
+- **Search** — global command-palette search across agents, workflows, memory,
+  and runs.
+- **Governance** — human-in-the-loop approvals, an audit log, notifications,
+  API keys (hashed), and revocable login sessions.
+
+## Project structure
 
 ```
 cloudlabos/
 ├── apps/
-│   ├── web/                    # Next.js 15 frontend
-│   ├── api-gateway/            # FastAPI gateway
-│   ├── agent-service/         # Agent orchestration
-│   ├── workflow-engine/        # DAG executor
-│   ├── memory-service/         # Vector + SQL memory
-│   ├── browser-service/       # Playwright pool
-│   └── research-service/       # External sources
-├── packages/
-│   └── agent-sdk/              # Python SDK for agents
-├── infrastructure/
-│   ├── docker/                 # Dockerfiles
-│   ├── kubernetes/             # K8s manifests
-│   ├── terraform/              # IaC
-│   └── monitoring/             # Prometheus, Grafana
-└── docker-compose.yml          # Full local stack
+│   ├── api/        # FastAPI backend (the real backend)
+│   └── web/        # Next.js dashboard
+├── legacy/         # Archived original microservices (reference only)
+├── infrastructure/ # Docker / k8s / terraform / monitoring
+└── docker-compose.yml  # Describes the LEGACY multi-service topology
 ```
 
-## Environment Variables
+> Note: the root `docker-compose.yml` still describes the archived multi-service
+> topology and is **not** the supported way to run the app today. Use the local
+> quick start above.
 
-```env
-# Database
-POSTGRES_PASSWORD=your_secure_password
+## Production
 
-# Redis
-REDIS_PASSWORD=your_redis_password
-
-# Security
-ENCRYPTION_KEY=base64_32_byte_key
-JWT_SECRET=base64_48_byte_secret
-
-# AI
-OPENROUTER_API_KEY=sk-or-v1-...
-OPENAI_API_KEY=sk-...
-
-# Observability
-GRAFANA_PASSWORD=admin123
-```
-
-## Development
-
-```bash
-# Run tests
-make test
-
-# Run linters
-make lint
-
-# View logs
-make logs service=api-gateway
-
-# Open container shell
-make shell service=postgres
-```
+See [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md) before exposing this to the
+internet. SSO and Stripe billing are intentionally left disabled until verified
+adapters are implemented.
 
 ## License
 
-Proprietary - CloudLabOS Enterprise
+Proprietary - CloudLabOS

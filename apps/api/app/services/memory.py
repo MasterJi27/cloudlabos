@@ -79,6 +79,21 @@ class MemoryService:
         await self.db.refresh(item)
         return item
 
+    async def bulk_create_items(self, collection_id: str, items: list[dict], created_by: Optional[str] = None) -> int:
+        count = 0
+        for data in items:
+            content = (data.get("content") or "").strip()
+            if not content:
+                continue
+            self.db.add(MemoryItem(
+                collection_id=collection_id, content=content,
+                meta=data.get("metadata", {}), source=data.get("source", "bulk-import"),
+                created_by=created_by, token_count=len(content.split()),
+            ))
+            count += 1
+        await self.db.commit()
+        return count
+
     async def delete_item(self, item_id: str) -> bool:
         result = await self.db.execute(select(MemoryItem).where(MemoryItem.id == item_id))
         item = result.scalar_one_or_none()

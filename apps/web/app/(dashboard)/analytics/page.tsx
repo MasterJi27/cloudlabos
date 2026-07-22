@@ -50,7 +50,18 @@ export default function AnalyticsPage() {
   const successCount = allRuns.filter(r => r.status === "success").length;
   const failedCount = allRuns.filter(r => r.status === "failed").length;
   const successRate = totalExecutions > 0 ? Math.round((successCount / totalExecutions) * 100) : 0;
-  const avgDuration = totalExecutions > 0 ? `${Math.round(Math.random() * 3 + 1)}m ${Math.round(Math.random() * 30 + 5)}s` : "—";
+
+  const formatDuration = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = Math.round(totalSeconds % 60);
+    return `${m}m ${s}s`;
+  };
+  const runDurationSeconds = (r: any) =>
+    r.started_at && r.completed_at ? (new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000 : null;
+  const timedRuns = allRuns.map(runDurationSeconds).filter((d): d is number => d !== null && d >= 0);
+  const avgDuration = timedRuns.length > 0
+    ? formatDuration(timedRuns.reduce((sum, d) => sum + d, 0) / timedRuns.length)
+    : "—";
 
   const now = new Date();
   const RANGE_DAYS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
@@ -70,36 +81,57 @@ export default function AnalyticsPage() {
     return { name, count: dayRuns.length };
   });
 
-  const agentDistData = agents.length > 0
-    ? agents.slice(0, 6).map((a, i) => ({
-        name: a.name || a.type,
-        value: Math.max(50, Math.round(Math.random() * 300 + 50)),
-      }))
-    : [{ name: "No data", value: 1 }];
+  const agentTaskCounts = agents.map(a => (a as any).tasks_total || 0);
+  const agentDistData = agents.length > 0 && agentTaskCounts.some(c => c > 0)
+    ? agents
+        .map(a => ({ name: a.name, value: (a as any).tasks_total || 0 }))
+        .filter(a => a.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 6)
+    : [{ name: "No task activity yet", value: 1 }];
 
-  const successRateTrend = allRuns.length > 0
-    ? Array.from({ length: Math.min(30, allRuns.length) }, (_, i) => ({
-        day: i + 1,
-        rate: 70 + Math.round(Math.random() * 28),
-      }))
-    : [{ day: 1, rate: 0 }];
+  const successRateTrend = Array.from({ length: rangeDays }, (_, i) => {
+    const dayOffset = rangeDays - 1 - i;
+    const dayStart = new Date(now);
+    dayStart.setDate(now.getDate() - dayOffset);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setHours(23, 59, 59, 999);
+    const dayRuns = allRuns.filter(r => {
+      const d = new Date(r.started_at);
+      return d >= dayStart && d <= dayEnd;
+    });
+    const daySuccess = dayRuns.filter(r => r.status === "success").length;
+    return {
+      day: rangeDays <= 7 ? dayNames[dayStart.getDay()] : `${dayStart.getMonth() + 1}/${dayStart.getDate()}`,
+      rate: dayRuns.length > 0 ? Math.round((daySuccess / dayRuns.length) * 100) : null,
+    };
+  });
 
-  const systemHealthScore = totalExecutions > 0
-    ? Math.min(100, successRate + Math.round(Math.random() * 10))
-    : 0;
+  // System Health is the overall success rate — an honest single real signal
+  // rather than an invented composite score.
+  const systemHealthScore = successRate;
   const systemHealth = [
     { name: "System Health", score: systemHealthScore, fill: "var(--text-primary)" }
   ];
+  const healthLabel = totalExecutions === 0 ? "No data" : systemHealthScore >= 90 ? "Excellent" : systemHealthScore >= 70 ? "Good" : "Needs attention";
 
-  const topWorkflowsData = workflows.length > 0
-    ? workflows.slice(0, 5).map((wf, i) => ({
-        id: i + 1,
+  const topWorkflowsData = workflows
+    .map((wf) => {
+      const wfRuns = allRuns.filter(r => r.workflow_id === wf.id);
+      const wfTimed = wfRuns.map(runDurationSeconds).filter((d): d is number => d !== null && d >= 0);
+      const wfSuccess = wfRuns.filter(r => r.status === "success").length;
+      return {
+        id: wf.id,
         name: wf.name,
-        runs: Math.round(Math.random() * 1000 + 100),
-        avgDuration: `${Math.round(Math.random() * 5 + 1)}m ${Math.round(Math.random() * 59)}s`,
-        successRate: +(70 + Math.random() * 30).toFixed(1),
-      }))
-    : [];
+        runs: wfRuns.length,
+        avgDuration: wfTimed.length > 0 ? formatDuration(wfTimed.reduce((s, d) => s + d, 0) / wfTimed.length) : "—",
+        successRate: wfRuns.length > 0 ? +((wfSuccess / wfRuns.length) * 100).toFixed(1) : 0,
+      };
+    })
+    .filter(wf => wf.runs > 0)
+    .sort((a, b) => b.runs - a.runs)
+    .slice(0, 5);
 
   const mostUsedWf = topWorkflowsData.length > 0 ? topWorkflowsData[0].name : "—";
 
@@ -172,7 +204,7 @@ export default function AnalyticsPage() {
               <LineChart data={successRateTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis dataKey="day" stroke="var(--text-tertiary)" fontSize={11} tickLine={false} axisLine={false} fontFamily="var(--font-geist-mono)" />
-                <YAxis stroke="var(--text-tertiary)" fontSize={11} tickLine={false} axisLine={false} domain={[70, 100]} fontFamily="var(--font-geist-mono)" />
+                <YAxis stroke="var(--text-tertiary)" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} fontFamily="var(--font-geist-mono)" />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Line type="monotone" dataKey="rate" stroke="var(--text-primary)" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: 'var(--void)', stroke: 'var(--text-primary)', strokeWidth: 2 }} />
               </LineChart>
@@ -207,7 +239,7 @@ export default function AnalyticsPage() {
             </ResponsiveContainer>
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
               <span className="text-[48px] font-medium tracking-header-lg text-[var(--text-primary)] font-mono">{systemHealth[0].score}%</span>
-              <span className="text-[12px] font-medium tracking-body text-[var(--text-secondary)] uppercase mt-1">Excellent</span>
+              <span className="text-[12px] font-medium tracking-body text-[var(--text-secondary)] uppercase mt-1">{healthLabel}</span>
             </div>
           </div>
         </div>

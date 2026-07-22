@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Brain, Cpu, Clock, Send, Trash2, MessageSquare, Wrench, Loader2, Database, Activity } from "lucide-react";
+import { ArrowLeft, Brain, Cpu, Clock, Send, Trash2, MessageSquare, Wrench, Loader2, Database, Activity, Plus, Copy, Download, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAgentsStore } from "@/lib/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -67,6 +67,27 @@ export default function AgentDetailPage() {
     } finally {
       setInvoking(false);
     }
+  };
+
+  const handleNewChat = async () => {
+    if (currentSessionId) {
+      try { await api.clearAgentSession(agentId, currentSessionId); } catch {}
+    }
+    setMessages([]);
+    setCurrentSessionId(null);
+  };
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard?.writeText(text);
+  };
+
+  const handleExportTranscript = () => {
+    const transcript = messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n");
+    const blob = new Blob([transcript], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `chat-${(agent?.name || "agent").replace(/\s+/g, "-").toLowerCase()}.txt`;
+    a.click(); URL.revokeObjectURL(url);
   };
 
   const handleDelete = async () => {
@@ -155,6 +176,11 @@ export default function AgentDetailPage() {
                 <span className="text-[var(--text-secondary)]">Tasks:</span>
                 <span className="text-[var(--text-primary)] font-medium">{agent.tasks_total || 0}</span>
               </div>
+              <div className="flex items-center gap-3 text-[13px]">
+                <Zap className="w-4 h-4 text-[var(--text-tertiary)]" />
+                <span className="text-[var(--text-secondary)]">Tokens used:</span>
+                <span className="text-[var(--text-primary)] font-medium">{(agent.tokens_used || 0).toLocaleString()}</span>
+              </div>
             </div>
 
             {agent.description && (
@@ -220,9 +246,21 @@ export default function AgentDetailPage() {
         {/* Right: Chat Interface */}
         <div className="lg:col-span-2">
           <div className="card flex flex-col h-[70vh]">
-            <div className="p-4 border-b border-[rgba(255,255,255,0.06)]">
-              <h2 className="text-[14px] font-medium tracking-body text-[var(--text-primary)]">Chat with {agent.name}</h2>
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Send a message to invoke this agent</p>
+            <div className="p-4 border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-[14px] font-medium tracking-body text-[var(--text-primary)] truncate">Chat with {agent.name}</h2>
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Send a message to invoke this agent</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {messages.length > 0 && (
+                  <button onClick={handleExportTranscript} title="Export transcript" className="btn-ghost px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                    <Download className="w-4 h-4" />
+                  </button>
+                )}
+                <button onClick={handleNewChat} title="New conversation" className="btn-ghost px-2 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                  <Plus className="w-4 h-4 mr-1" /> New
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -234,13 +272,20 @@ export default function AgentDetailPage() {
                 </div>
               )}
               {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] p-3 rounded-xl text-[13px] leading-relaxed ${
+                <div key={i} className={`flex group ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`relative max-w-[80%] p-3 rounded-xl text-[13px] leading-relaxed ${
                     msg.role === "user"
                       ? "bg-[var(--surface-2)] text-[var(--text-primary)]"
                       : "bg-[var(--surface-1)] text-[var(--text-secondary)]"
                   }`}>
                     <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <button
+                      onClick={() => handleCopy(msg.content)}
+                      title="Copy message"
+                      className="absolute -top-2 -right-2 p-1 rounded-md bg-[var(--surface-3)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               ))}
