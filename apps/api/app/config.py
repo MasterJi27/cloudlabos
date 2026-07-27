@@ -40,8 +40,32 @@ class Settings(BaseSettings):
     model_config = {
         "env_prefix": "CLOUDLABOS_",
         "env_file": ".env",
-        "extra_allowed": ["openrouter_api_key"],
+        "extra": "ignore",
     }
 
 
+DEFAULT_SECRET = "change-me-in-production"
+
+# Substrings that mark a placeholder secret. Any of these means the value came
+# from committed example config rather than a real deployment secret — and this
+# repository is public, so such a key is effectively known to everyone.
+_WEAK_SECRET_MARKERS = ("change-me", "changeme", "change_me", "dev-secret",
+                        "dev-only", "your-key", "placeholder", "example", "secret-key")
+
 settings = Settings()
+
+
+def _is_weak_secret(value: str) -> bool:
+    lowered = value.lower()
+    return (len(value) < 32
+            or value == DEFAULT_SECRET
+            or any(marker in lowered for marker in _WEAK_SECRET_MARKERS))
+
+
+# Fail fast rather than serve traffic with a forgeable signing key.
+if settings.environment != "development" and _is_weak_secret(settings.secret_key):
+    raise RuntimeError(
+        "CLOUDLABOS_SECRET_KEY looks like a placeholder or is too short. "
+        f"Set a unique random value (32+ chars) when ENVIRONMENT={settings.environment}. "
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+    )

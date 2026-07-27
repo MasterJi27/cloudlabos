@@ -10,8 +10,11 @@ from app.api.v1 import v1_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Tables must exist in every environment, otherwise a fresh deploy comes up
+    # with an empty database and every request fails. create_all is idempotent.
+    await init_db()
+    # Demo data (including a well-known admin login) is development-only.
     if settings.environment == "development":
-        await init_db()
         await seed_data()
     yield
 
