@@ -179,7 +179,12 @@ class AgentService:
         if not api_key:
             return f"[{agent.name}] No API key configured. Configure OPENROUTER_API_KEY in .env"
 
-        model = getattr(agent, "config", {}).get("model", settings.default_model) or settings.default_model
+        # agent.model is the field the Provision Agent form actually writes to.
+        # config["model"] is honored too, as a per-invoke override, but nothing
+        # in the UI sets it — the previous code read only config and ignored
+        # agent.model, so every agent silently used settings.default_model
+        # regardless of which model the user picked at creation time.
+        model = (agent.config or {}).get("model") or agent.model or settings.default_model
         system_prompt = agent.system_prompt or f"You are {agent.name}, a {agent.agent_type} agent."
 
         try:

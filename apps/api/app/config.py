@@ -34,7 +34,9 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    default_model: str = "google/gemini-2.0-flash-lite-001"
+    # A free-tier model that reliably has live endpoints, so a fresh install
+    # gets a working default without anyone needing to pick a paid model first.
+    default_model: str = "google/gemma-4-26b-a4b-it:free"
     github_token: str = ""
 
     model_config = {

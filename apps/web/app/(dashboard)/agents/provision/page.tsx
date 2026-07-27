@@ -13,11 +13,14 @@ const AGENT_TYPES = [
   { value: "automation", label: "Automation Agent", desc: "Automate repetitive tasks and workflows" },
 ];
 
+// Model slugs are routed through OpenRouter, which renames/retires them over
+// time — verify at https://openrouter.ai/models before assuming a slug works.
 const MODELS = [
+  { value: "google/gemma-4-26b-a4b-it:free", label: "Gemma (Free)" },
   { value: "gpt-4o", label: "GPT-4o" },
   { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-  { value: "google/gemini-2.0-flash-lite-001", label: "Gemini 2.0 Flash Lite" },
-  { value: "google/gemini-2.0-flash-001", label: "Gemini 2.0 Flash" },
+  { value: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
+  { value: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   { value: "anthropic/claude-3-haiku", label: "Claude 3 Haiku" },
 ];
 
@@ -28,7 +31,7 @@ export default function ProvisionAgentPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [agentType, setAgentType] = useState("general");
-  const [model, setModel] = useState("gpt-4o");
+  const [model, setModel] = useState("google/gemma-4-26b-a4b-it:free");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const [saving, setSaving] = useState(false);
