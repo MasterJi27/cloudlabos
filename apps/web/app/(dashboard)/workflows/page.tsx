@@ -5,12 +5,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, Search, Play, GitBranch, Clock, CheckCircle2, X, Loader2,
-  ArrowLeft, Save, PlusCircle, Trash2, Edit2, AlertCircle, Upload, Download, Copy, LayoutTemplate
+  ArrowLeft, Save, PlusCircle, Trash2, Edit2, AlertCircle, Upload, Download, Copy, LayoutTemplate, Star
 } from "lucide-react";
 import { useStore } from "@/store";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import { CronBuilder } from "@/components/ui/CronBuilder";
+import { SortHeader, useSort } from "@/components/ui/SortHeader";
 import ReactFlow, {
   Background, Controls, useNodesState, useEdgesState, addEdge, Connection, Edge, Node
 } from "reactflow";
@@ -87,6 +90,11 @@ export default function WorkflowsPage() {
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; description: string; category: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
+  const [schedulingFor, setSchedulingFor] = useState<any | null>(null);
 
   const [editingWorkflow, setEditingWorkflow] = useState<any | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -101,7 +109,10 @@ export default function WorkflowsPage() {
   }, []);
 
   useEffect(() => {
-    if (currentWorkspace) fetchWorkflows();
+    if (currentWorkspace) {
+      setLoading(true);
+      Promise.resolve(fetchWorkflows()).finally(() => setLoading(false));
+    }
   }, [currentWorkspace, fetchWorkflows]);
 
   useEffect(() => {
@@ -111,13 +122,58 @@ export default function WorkflowsPage() {
     }
   }, [searchParams, router]);
 
-  const filteredWorkflows = workflows.filter((w) =>
-    w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (w.description && w.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  const searched = workflows.filter((w) =>
+    (w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (w.description && w.description.toLowerCase().includes(searchQuery.toLowerCase()))) &&
+    (!starredOnly || (w as any).is_starred)
+  );
+
+  const { sort, toggle: toggleSort, sorted: filteredWorkflows } = useSort<any, "name" | "status" | "steps" | "created_at">(
+    searched,
+    (w, key) => (key === "steps" ? w.steps ?? 0 : (w as any)[key]),
   );
 
   const activeCount = workflows.filter((w) => w.status === "active").length;
   const draftCount = workflows.filter((w) => w.status === "draft").length;
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const toggleSelectAll = () =>
+    setSelectedIds((prev) =>
+      prev.size === filteredWorkflows.length ? new Set() : new Set(filteredWorkflows.map((w: any) => w.id)),
+    );
+
+  const handleStar = async (id: string, current: boolean) => {
+    try {
+      await api.updateWorkflow(id, { is_starred: !current });
+      await fetchWorkflows();
+    } catch (e: any) { toast("error", e.message || "Failed to update"); }
+  };
+
+  const runBulkAction = async (action: "publish" | "delete") => {
+    const ids = Array.from(selectedIds);
+    setBulkWorking(true);
+    setSelectedIds(new Set());
+    try {
+      if (action === "delete") {
+        await Promise.all(ids.map((id) => api.deleteWorkflow(id)));
+        toast("success", `${ids.length} workflow(s) deleted`);
+      } else {
+        await Promise.all(ids.map((id) => api.publishWorkflow(id)));
+        toast("success", `${ids.length} workflow(s) published`);
+      }
+      await fetchWorkflows();
+    } catch (e: any) {
+      toast("error", e.message || `Failed to ${action} workflows`);
+    } finally {
+      setBulkWorking(false);
+    }
+  };
 
   const handleCreateWorkflow = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,8 +484,8 @@ export default function WorkflowsPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 mb-8">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex flex-wrap items-center gap-4 mb-4">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
           <input
             type="text"
@@ -439,8 +495,56 @@ export default function WorkflowsPage() {
             className="input pl-9"
           />
         </div>
+
+        <button
+          onClick={() => setStarredOnly((s) => !s)}
+          className={`btn-secondary h-9 px-3 text-[12px] ${starredOnly ? "text-[var(--warning)]" : ""}`}
+          title="Show starred only"
+        >
+          <Star className="w-3.5 h-3.5 mr-1.5" fill={starredOnly ? "currentColor" : "none"} /> Starred
+        </button>
+
+        <div className="flex items-center gap-3 text-[11px] font-medium tracking-micro text-[var(--text-tertiary)] ml-auto">
+          <span className="uppercase">Sort</span>
+          <SortHeader label="Name" sortKey="name" sort={sort} onToggle={toggleSort} />
+          <SortHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+          <SortHeader label="Steps" sortKey="steps" sort={sort} onToggle={toggleSort} />
+          <SortHeader label="Created" sortKey="created_at" sort={sort} onToggle={toggleSort} />
+        </div>
       </div>
 
+      {/* Bulk actions */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-[var(--surface-1)] shadow-[var(--edge-subtle)] rounded-lg animate-fade-in">
+          <span className="text-[13px] text-[var(--text-primary)] font-medium">{selectedIds.size} selected</span>
+          <div className="w-px h-4 bg-[rgba(255,255,255,0.06)]" />
+          <button disabled={bulkWorking} onClick={() => runBulkAction("publish")} className="btn-ghost text-[12px] h-7 px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
+            <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Publish
+          </button>
+          <button disabled={bulkWorking} onClick={() => runBulkAction("delete")} className="btn-ghost text-[12px] h-7 px-2 text-[var(--danger)] hover:bg-[var(--danger)]/10 disabled:opacity-50">
+            <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} className="btn-ghost text-[12px] h-7 px-2 text-[var(--text-tertiary)] ml-auto">Clear</button>
+        </div>
+      )}
+
+      {filteredWorkflows.length > 0 && (
+        <label className="flex items-center gap-2 mb-4 text-[12px] text-[var(--text-secondary)] cursor-pointer w-fit">
+          <input
+            type="checkbox"
+            checked={selectedIds.size === filteredWorkflows.length && filteredWorkflows.length > 0}
+            onChange={toggleSelectAll}
+            className="accent-[var(--text-primary)]"
+          />
+          Select all
+        </label>
+      )}
+
+      {loading && workflows.length === 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {filteredWorkflows.map((workflow, idx) => {
           const config = statusConfig[workflow.status] || statusConfig.draft;
@@ -455,6 +559,14 @@ export default function WorkflowsPage() {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-4 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(workflow.id)}
+                    onChange={() => toggleSelect(workflow.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Select ${workflow.name}`}
+                    className="mt-3 accent-[var(--text-primary)] flex-shrink-0"
+                  />
                   <div className="w-10 h-10 rounded-lg bg-[var(--surface-2)] shadow-[var(--edge-subtle)] flex items-center justify-center flex-shrink-0">
                     <GitBranch className="w-4 h-4 text-[var(--text-primary)]" />
                   </div>
@@ -467,6 +579,14 @@ export default function WorkflowsPage() {
                     <p className="text-[13px] text-[var(--text-secondary)] line-clamp-2 leading-relaxed">{workflow.description}</p>
                   </div>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleStar(workflow.id, (workflow as any).is_starred); }}
+                  title={(workflow as any).is_starred ? "Unstar" : "Star"}
+                  aria-label={(workflow as any).is_starred ? `Unstar ${workflow.name}` : `Star ${workflow.name}`}
+                  className={`btn-ghost px-2 flex-shrink-0 ${(workflow as any).is_starred ? "text-[var(--warning)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}`}
+                >
+                  <Star className="w-4 h-4" fill={(workflow as any).is_starred ? "currentColor" : "none"} />
+                </button>
               </div>
 
               <div className="flex items-center gap-5 mt-5 pt-4 border-t border-[rgba(255,255,255,0.04)] text-[12px] font-mono text-[var(--text-tertiary)]">
@@ -518,16 +638,10 @@ export default function WorkflowsPage() {
                       Publish
                     </button>
                     <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        const cron = window.prompt("Cron schedule (UTC), e.g. 0 9 * * 1-5");
-                        if (!cron) return;
-                        try { await api.createWorkflowSchedule(workflow.id, cron); toast("success", "Schedule created."); }
-                        catch { toast("error", "Unable to create schedule. Use a valid cron expression."); }
-                      }}
+                      onClick={(e) => { e.stopPropagation(); setSchedulingFor(workflow); }}
                       className="btn-ghost h-8 text-[12px] px-3"
                     >
-                      Schedule
+                      <Clock className="w-3.5 h-3.5 mr-1.5" /> Schedule
                     </button>
                     <div className="flex-1" />
                     <button onClick={(e) => { e.stopPropagation(); handleClone(workflow.id); }} title="Duplicate" className="btn-ghost h-8 px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
@@ -557,6 +671,23 @@ export default function WorkflowsPage() {
           />
         )}
       </div>
+      )}
+
+      {schedulingFor && (
+        <CronBuilder
+          workflowName={schedulingFor.name}
+          onClose={() => setSchedulingFor(null)}
+          onSave={async (cron) => {
+            try {
+              await api.createWorkflowSchedule(schedulingFor.id, cron);
+              toast("success", `Scheduled "${schedulingFor.name}"`);
+              setSchedulingFor(null);
+            } catch (e: any) {
+              toast("error", e.message || "Unable to create schedule. Use a valid cron expression.");
+            }
+          }}
+        />
+      )}
 
       <AnimatePresence>
         {isModalOpen && (

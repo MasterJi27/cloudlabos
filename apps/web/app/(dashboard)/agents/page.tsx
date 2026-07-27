@@ -13,6 +13,8 @@ import { AnimatedCounter } from "@/components/AnimatedCounter";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { Pagination } from "@/components/ui/Pagination";
+import { SkeletonList } from "@/components/ui/Skeleton";
+import { SortHeader, useSort } from "@/components/ui/SortHeader";
 
 const MetricCard = ({ label, value, trend, trendUp }: { label: string, value: string | number, trend: string, trendUp?: boolean }) => (
   <div>
@@ -46,8 +48,15 @@ export default function AgentsGrid() {
     setIsClient(true);
   }, []);
 
+  const [loading, setLoading] = useState(true);
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [tagFilter, setTagFilter] = useState("");
+
   useEffect(() => {
-    if (currentWorkspace) fetchAgents();
+    if (currentWorkspace) {
+      setLoading(true);
+      Promise.resolve(fetchAgents()).finally(() => setLoading(false));
+    }
   }, [currentWorkspace, fetchAgents]);
 
   const toggleSelect = (id: string) => {
@@ -131,7 +140,21 @@ export default function AgentsGrid() {
   };
 
   const activeCount = agents.filter(a => a.status === 'active' || a.status === 'busy').length;
-  const filteredAgents = agents.filter(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()) || a.id.includes(searchQuery));
+
+  // Every distinct tag across the fleet, for the tag filter dropdown.
+  const allTags = Array.from(new Set(agents.flatMap((a: any) => a.tags || []))).sort() as string[];
+
+  const searchedAgents = agents.filter((a: any) =>
+    (a.name.toLowerCase().includes(searchQuery.toLowerCase()) || a.id.includes(searchQuery)) &&
+    (!starredOnly || a.is_starred) &&
+    (!tagFilter || (a.tags || []).includes(tagFilter))
+  );
+
+  const { sort, toggle: toggleSort, sorted: filteredAgents } = useSort<any, "name" | "status" | "agent_type" | "tasks_total">(
+    searchedAgents,
+    (a, key) => (key === "tasks_total" ? a.tasks_total ?? 0 : a[key]),
+  );
+
   const selectedCount = selectedIds.size;
   const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
   const paginatedAgents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -182,10 +205,24 @@ export default function AgentsGrid() {
             className="input pl-9"
           />
         </div>
-        <button className="btn-ghost px-2">
-          <Filter className="w-4 h-4 mr-2" />
-          Filter
-        </button>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <button
+            onClick={() => setStarredOnly((s) => !s)}
+            className={`btn-secondary h-9 px-3 text-[12px] ${starredOnly ? "text-[var(--warning)]" : ""}`}
+            title="Show starred only"
+          >
+            <Star className="w-3.5 h-3.5 mr-1.5" fill={starredOnly ? "currentColor" : "none"} /> Starred
+          </button>
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            aria-label="Filter by tag"
+            className="input h-9 w-40 text-[12px]"
+          >
+            <option value="">All tags</option>
+            {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Bulk Actions */}
@@ -211,12 +248,23 @@ export default function AgentsGrid() {
           <div className="w-8 flex items-center">
             <input type="checkbox" checked={selectedIds.size === filteredAgents.length && filteredAgents.length > 0} onChange={toggleSelectAll} className="accent-[var(--text-primary)]" />
           </div>
-          <div className="w-1/3">Agent / Model</div>
-          <div className="w-1/4">Current Task</div>
-          <div className="w-1/6">Metrics</div>
-          <div className="w-1/4 text-right">Actions</div>
+          <div className="w-1/3">
+            <SortHeader label="Agent / Model" sortKey="name" sort={sort} onToggle={toggleSort} />
+          </div>
+          <div className="w-1/4">
+            <SortHeader label="Type" sortKey="agent_type" sort={sort} onToggle={toggleSort} />
+          </div>
+          <div className="w-1/6">
+            <SortHeader label="Tasks" sortKey="tasks_total" sort={sort} onToggle={toggleSort} />
+          </div>
+          <div className="w-1/4 text-right flex justify-end">
+            <SortHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+          </div>
         </div>
 
+        {loading && agents.length === 0 ? (
+          <SkeletonList rows={5} columns={4} />
+        ) : (
         <div className="divide-y divide-[rgba(255,255,255,0.04)]">
           {paginatedAgents.map((agent) => (
             <div key={agent.id} className="flex items-center py-5 px-4 -mx-4 rounded-lg hover:bg-[var(--surface-2)] transition-colors group">
@@ -235,13 +283,24 @@ export default function AgentsGrid() {
                     "bg-[var(--text-tertiary)]"
                   }`} />
                   <div className="min-w-0">
-                    <h3 className="text-[15px] font-medium text-[var(--text-primary)] truncate tracking-body">
+                    <h3 className="text-[15px] font-medium text-[var(--text-primary)] truncate tracking-body flex items-center gap-2">
                       {agent.name}
+                      {(agent as any).is_starred && <Star className="w-3 h-3 text-[var(--warning)] shrink-0" fill="currentColor" />}
                     </h3>
-                    <div className="text-[12px] text-[var(--text-tertiary)] flex items-center gap-2 mt-0.5">
+                    <div className="text-[12px] text-[var(--text-tertiary)] flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="font-mono">{agent.id.slice(0, 8)}</span>
                       <span>•</span>
-                      <span className="flex items-center gap-1.5"><Brain className="w-3 h-3" /> GPT-4o</span>
+                      <span className="flex items-center gap-1.5"><Brain className="w-3 h-3" /> {(agent as any).model || "—"}</span>
+                      {((agent as any).tags || []).map((t: string) => (
+                        <button
+                          key={t}
+                          onClick={(e) => { e.stopPropagation(); setTagFilter(t); }}
+                          title={`Filter by ${t}`}
+                          className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                        >
+                          {t}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -319,6 +378,7 @@ export default function AgentsGrid() {
             />
           )}
         </div>
+        )}
         <Pagination page={page} totalPages={totalPages} totalItems={filteredAgents.length} pageSize={PAGE_SIZE} onChange={setPage} />
       </div>
 

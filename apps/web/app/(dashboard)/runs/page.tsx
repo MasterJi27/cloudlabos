@@ -12,6 +12,8 @@ import { Tabs } from "@/components/Tabs";
 import { useToast } from "@/components/ui/Toast";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Pagination } from "@/components/ui/Pagination";
+import { SkeletonList } from "@/components/ui/Skeleton";
+import { SortHeader, useSort } from "@/components/ui/SortHeader";
 
 const statusConfig: Record<string, { color: string; bg: string; icon: React.ElementType; label: string }> = {
   running: { color: "text-[var(--text-primary)]", bg: "bg-[var(--surface-2)] shadow-[var(--edge-subtle)]", icon: Play, label: "Running" },
@@ -49,17 +51,26 @@ export default function RunsPage() {
     currentWorkspace 
   } = useStore();
 
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     if (currentWorkspace) {
-      fetchRuns();
-      fetchWorkflows();
+      setLoading(true);
+      Promise.all([fetchRuns(), fetchWorkflows()]).finally(() => setLoading(false));
     }
   }, [currentWorkspace, fetchRuns, fetchWorkflows]);
 
   useEffect(() => { setPage(1); }, [filter]);
 
   const allRuns = [...activeRuns, ...runHistory];
-  const filteredRuns = filter === "all" ? allRuns : allRuns.filter((r) => r.status === filter);
+  const statusFiltered = filter === "all" ? allRuns : allRuns.filter((r) => r.status === filter);
+
+  const { sort, toggle: toggleSort, sorted: filteredRuns } = useSort<any, "workflow_name" | "trigger" | "status" | "started_at">(
+    statusFiltered,
+    (r, key) => (r as any)[key],
+    { key: "started_at", dir: "desc" },
+  );
+
   const totalPages = Math.ceil(filteredRuns.length / PAGE_SIZE);
   const paginatedRuns = filteredRuns.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -208,6 +219,17 @@ export default function RunsPage() {
         />
       </div>
 
+      <div className="flex items-center gap-3 mb-4 text-[11px] font-medium tracking-micro text-[var(--text-tertiary)]">
+        <span className="uppercase">Sort</span>
+        <SortHeader label="Workflow" sortKey="workflow_name" sort={sort} onToggle={toggleSort} />
+        <SortHeader label="Trigger" sortKey="trigger" sort={sort} onToggle={toggleSort} />
+        <SortHeader label="Status" sortKey="status" sort={sort} onToggle={toggleSort} />
+        <SortHeader label="Started" sortKey="started_at" sort={sort} onToggle={toggleSort} />
+      </div>
+
+      {loading && allRuns.length === 0 ? (
+        <div className="card"><SkeletonList rows={5} columns={4} /></div>
+      ) : (
       <div className="space-y-3">
         {paginatedRuns.map((run, idx) => {
           const config = statusConfig[run.status] || statusConfig.pending;
@@ -324,6 +346,7 @@ export default function RunsPage() {
         )}
         <Pagination page={page} totalPages={totalPages} totalItems={filteredRuns.length} pageSize={PAGE_SIZE} onChange={setPage} />
       </div>
+      )}
 
       <AnimatePresence>
         {isModalOpen && (

@@ -23,6 +23,7 @@ export default function MemoryPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState("all");
+  const [tagFilter, setTagFilter] = useState("");
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
 
@@ -114,10 +115,14 @@ export default function MemoryPage() {
     }
   };
 
+  // Every distinct tag across the loaded items, for the tag filter dropdown.
+  const allTags = Array.from(new Set(allItems.flatMap((i: any) => i.tags || []))).sort() as string[];
+
   const filteredItems = allItems.filter((item: any) => {
     const matchesSearch = item.content.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = selectedType === "all" || item.content_type === selectedType;
-    return matchesSearch && matchesType;
+    const matchesTag = !tagFilter || (item.tags || []).includes(tagFilter);
+    return matchesSearch && matchesType && matchesTag;
   });
 
   const stats = {
@@ -206,6 +211,21 @@ export default function MemoryPage() {
         <button onClick={handleSearch} className="btn-secondary px-3 h-8">
           <Search className="w-4 h-4" />
         </button>
+        <select
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+          aria-label="Filter by tag"
+          className="input h-8 w-40 text-[12px]"
+          disabled={allTags.length === 0}
+        >
+          <option value="">{allTags.length === 0 ? "No tags yet" : "All tags"}</option>
+          {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {tagFilter && (
+          <button onClick={() => setTagFilter("")} className="btn-ghost px-2 text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+            Clear
+          </button>
+        )}
       </div>
 
       <div className="mb-6">

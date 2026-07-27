@@ -256,15 +256,21 @@ class WorkflowService:
         scheduler exists yet, so this is the tick that drives scheduled runs."""
         from croniter import croniter
         now = datetime.now(timezone.utc)
+
+        def _aware(dt: datetime) -> datetime:
+            # SQLite hands back naive datetimes; treat those as UTC so they can
+            # be compared against `now` without raising.
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
         rows = (await self.db.execute(
             select(WorkflowSchedule).join(Workflow)
             .where(Workflow.workspace_id == workspace_id, WorkflowSchedule.enabled == True)
         )).scalars().all()
         triggered = []
         for sched in rows:
-            base = sched.last_run_at or sched.created_at
+            base = _aware(sched.last_run_at or sched.created_at or now)
             try:
-                due = croniter(sched.cron, base).get_next(datetime) <= now
+                due = _aware(croniter(sched.cron, base).get_next(datetime)) <= now
             except (ValueError, KeyError):
                 continue  # invalid cron expression — skip rather than crash the tick
             if due:
